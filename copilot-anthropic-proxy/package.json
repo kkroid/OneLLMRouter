@@ -1,0 +1,11 @@
+{
+  "name": "copilot-anthropic-proxy",
+  "version": "1.0.0",
+  "description": "Anthropic-compatible API proxy for GitHub Copilot",
+  "scripts": {
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "hono": "^4.0.0"
+  }
+}

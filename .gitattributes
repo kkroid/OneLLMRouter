@@ -1,0 +1,9 @@
+# 统一换行符为 LF，避免 Windows/Linux 混用问题
+* text=auto eol=lf
+
+# Shell 脚本必须 LF
+*.sh text eol=lf
+
+# Docker 相关文件
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf

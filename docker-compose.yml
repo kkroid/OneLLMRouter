@@ -1,0 +1,85 @@
+services:
+  copilot-anthropic:
+    # 精简 Anthropic API 代理，专供 Claude Code CLI 使用
+    build: ./copilot-anthropic-proxy
+    image: copilot-anthropic-proxy:latest
+    container_name: copilot-anthropic
+    restart: unless-stopped
+    environment:
+      - PORT=4142
+      - GITHUB_TOKEN_FILE=/gh-token/github_token
+      - http_proxy=http://host.containers.internal:1082
+      - https_proxy=http://host.containers.internal:1082
+    ports:
+      - "4142:4142"
+    volumes:
+      - ./data/copilot-api:/gh-token:ro
+      - ./copilot-anthropic-proxy/models.conf:/app/models.conf:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:4142/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  9router:
+    image: ghcr.io/decolua/9router:latest
+    container_name: 9router
+    restart: unless-stopped
+    volumes:
+      - 9router-data:/app/data
+    environment:
+      # 通过环境变量注入路由规则，${DEEPSEEK_API_KEY} 自动从 .env 读取
+      PROVIDERS: >
+        [
+          {
+            "name": "deepseek",
+            "api_base_url": "https://api.deepseek.com/anthropic",
+            "api_key": "${DEEPSEEK_API_KEY}",
+            "format": "claude",
+            "models": ["deepseek-v4-pro", "deepseek-v4-flash"]
+          },
+          {
+            "name": "copilot-claude",
+            "api_base_url": "http://copilot-anthropic:4142",
+            "api_key": "not-needed",
+            "format": "claude",
+            "models": ["claude-opus-4.8", "claude-fable-5"]
+          }
+        ]
+      PORT: "3456"
+    ports:
+      - "3456:3456"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3456/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  register-providers:
+    image: ghcr.io/ericc-ch/copilot-api:latest
+    container_name: register-providers
+    depends_on:
+      9router:
+        condition: service_healthy
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    volumes:
+      - ./register-providers.sh:/register.sh:ro
+    entrypoint: ["/bin/sh", "/register.sh"]
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  9router-data:
+
+
