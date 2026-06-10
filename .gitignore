@@ -2,14 +2,14 @@
 .env
 
 # 生成的输出文件
-out/
+out/*
+!out/.gitkeep
 
 # 9router 运行时数据 (数据库、JWT、机器ID等)
 9router-data/
 
 # GitHub Copilot token
 copilot-anthropic-proxy/github_token
-data/
 
 # 依赖
 node_modules/
