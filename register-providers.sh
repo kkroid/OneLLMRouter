@@ -70,7 +70,7 @@ for (const p of list) {
   const r = await post(API + '/provider-nodes', {
     name: p.name,
     prefix: p.prefix,
-    baseUrl: p.baseurl,
+    baseUrl: p.base_url,
     type: 'anthropic-compatible'
   });
   console.log(p.prefix + ' node:', JSON.stringify(r.data));
@@ -80,7 +80,7 @@ for (const p of list) {
     const c = await post(API + '/providers', {
       provider: nodeId,
       name: p.name,
-      apiKey: p.apikey || '',
+      apiKey: p.api_key || '',
       label: p.name
     });
     console.log(p.prefix + ' conn:', c.ok ? 'OK' : 'FAIL');
