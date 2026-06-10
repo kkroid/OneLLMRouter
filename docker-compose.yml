@@ -17,13 +17,20 @@ services:
       - ./copilot-anthropic-proxy:/host-config:ro
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "bun", "/healthcheck.ts"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   9router:
     image: ghcr.io/decolua/9router:latest
     container_name: 9router
     restart: unless-stopped
     depends_on:
-      - copilot-anthropic
+      copilot-anthropic:
+        condition: service_healthy
     volumes:
       - 9router-data:/app/data
     environment:
