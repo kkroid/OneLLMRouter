@@ -7,14 +7,14 @@ services:
     restart: unless-stopped
     environment:
       - PORT=4142
-      - GITHUB_TOKEN_FILE=/gh-token/github_token
+      - GITHUB_TOKEN_FILE=/host-config/github_token
+      - MODELS_CONF=/host-config/models.conf
       - http_proxy=http://host.containers.internal:1082
       - https_proxy=http://host.containers.internal:1082
     ports:
       - "4142:4142"
     volumes:
-      - ./copilot-anthropic-proxy/github_token:/gh-token/github_token:ro
-      - ./copilot-anthropic-proxy/models.conf:/app/models.conf:ro
+      - ./copilot-anthropic-proxy:/host-config:ro
     networks:
       - internal
     healthcheck:
