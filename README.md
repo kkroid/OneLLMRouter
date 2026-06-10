@@ -62,6 +62,8 @@ GITHUB_TOKEN=ghu_xxxxxxxx
 
 ### 3. 获取 GitHub Copilot Token
 
+> **注意**：Copilot API 需要的是 **设备 OAuth Token**（`ghu_` 前缀），不是 GitHub Personal Access Token（`ghp_` 前缀）。两者是不同的认证体系，PAT 无法用于 Copilot API。
+
 使用 copilot-api 完成设备认证（一次性）：
 
 ```bash
