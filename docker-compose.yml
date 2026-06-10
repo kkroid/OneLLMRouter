@@ -1,71 +1,28 @@
 services:
-  copilot-anthropic:
-    # 精简 Anthropic API 代理，专供 Claude Code CLI 使用
+  onecc:
     build: ./copilot-anthropic-proxy
-    image: copilot-anthropic-proxy:latest
-    container_name: copilot-anthropic
+    image: onecc:latest
+    container_name: onecc
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      - PORT=4142
+      - PORT=3456
+      - OUT_DIR=/out
       - GITHUB_TOKEN_FILE=/host-config/github_token
       - MODELS_CONF=/host-config/models.conf
       - http_proxy=http://host.containers.internal:1082
       - https_proxy=http://host.containers.internal:1082
     ports:
-      - "4142:4142"
+      - "3456:3456"
     volumes:
       - ./copilot-anthropic-proxy:/host-config:ro
-    networks:
-      - internal
+      - ./out:/out
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4142/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3456/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
-
-  9router:
-    image: ghcr.io/decolua/9router:latest
-    container_name: 9router
-    restart: unless-stopped
-    depends_on:
-      copilot-anthropic:
-        condition: service_healthy
-    volumes:
-      - 9router-data:/app/data
-    environment:
-      PORT: "3456"
-    ports:
-      - "3456:3456"
-    networks:
-      - internal
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3456/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-
-  register-providers:
-    image: ghcr.io/ericc-ch/copilot-api:latest
-    container_name: register-providers
-    depends_on:
-      9router:
-        condition: service_healthy
-    env_file:
-      - .env
-    volumes:
-      - ./register-providers.sh:/register.sh:ro
-      - ./out:/out
-    entrypoint: ["/bin/sh", "/register.sh"]
-    networks:
-      - internal
-
-networks:
-  internal:
-    driver: bridge
-
-volumes:
-  9router-data:
 
 

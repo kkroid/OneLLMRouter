@@ -1,6 +1,8 @@
 # OneCCRouter
 
-基于 [9router](https://github.com/decolua/9router) 的 AI 模型路由网关，将 GitHub Copilot Claude 模型及任意 Anthropic-compatible API 统一暴露为单一入口，供 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 等工具使用。
+单容器 AI 模型路由网关。将 GitHub Copilot Claude 模型 + 任意 Anthropic-compatible API 统一暴露为单一 Anthropic 接口，供 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 等工具使用。
+
+**167 MB，3 秒启动，零外部依赖。**
 
 ## 架构
 
@@ -8,71 +10,57 @@
 Claude Code CLI
       │
       ▼
-  localhost:3456  ───  9router (Provider Router)
+  localhost:3456  ───  OneCC Proxy（单容器）
       │
-      ├── cp/claude-opus-4.8  ──▶  copilot-anthropic:4142  ──▶  Copilot API
-      ├── cp/claude-fable-5   ──▶  copilot-anthropic:4142  ──▶  Copilot API
-      └── ds/* | your/*       ──▶  任意 Anthropic-compatible API
+      ├── cp/claude-*  ──▶  Copilot API（Anthropic ↔ OpenAI 翻译）
+      └── ds/* | 任意  ──▶  Anthropic-compatible API（直通）
 ```
-
-| 组件 | 说明 |
-|------|------|
-| **9router** | AI 模型路由网关，统一 Anthropic-compatible 入口 (`:3456`) |
-| **copilot-anthropic** | 将 Copilot OpenAI 格式翻译为 Anthropic 格式的代理 (`:4142`) |
-| **register-providers** | 一次性启动脚本，读取 `providers.json` 自动注册所有 provider，并生成 Claude Code 配置文件 |
 
 ## 可用模型
 
-模型由 `.env` 中的 `PROVIDER_<N>_*` 变量定义，默认包含：
+由 `.env` 中的 `PROVIDER_<N>_*` 变量定义：
 
-| 前缀 | 模型 ID | 来源 |
+| 前缀 | 模型 ID | 说明 |
 |------|--------|------|
 | `cp/` | `claude-opus-4.8` | GitHub Copilot |
 | `cp/` | `claude-fable-5` | GitHub Copilot |
-| `ds/` | `deepseek-v4-pro` | 任意 Anthropic API |
-| `ds/` | `deepseek-v4-flash` | 任意 Anthropic API |
+| `ds/` | `deepseek-v4-pro` | 示例：DeepSeek |
+| `ds/` | `deepseek-v4-flash` | 示例：DeepSeek |
 
-> 添加新 provider 只需在 `.env` 中增加 `PROVIDER_3_*` 等变量，重新运行 `podman compose up -d` 即可。
+> 添加新 provider：`.env` 中加 `PROVIDER_3_*` 等变量，重启即生效。
 
 ## 前置条件
 
 - **Podman** 或 **Docker** + Docker Compose
-- **代理 `127.0.0.1:1082`** — GitHub Copilot 对 Claude 模型有 IP 区域限制（Clash/V2Ray 等）
-- **各 provider 的 API Key**（按需配置）
-- **GitHub Device Token** — 用于 Copilot API 认证（见步骤 3）
+- **代理 `127.0.0.1:1082`** — GitHub Copilot Claude 模型的 IP 区域限制（Clash/V2Ray）
+- **各 provider 的 API Key**
+- **GitHub Device Token** — Copilot 认证（见步骤 3）
 
 ## 部署步骤
 
-### 1. 克隆项目
+### 1. 克隆 & 配置
 
 ```bash
-git clone <repo-url>
-cd OneCCRouter
-```
-
-### 2. 配置环境变量
-
-```bash
+git clone <repo-url> && cd OneCCRouter
 cp .env.example .env
 ```
 
-编辑 `.env`，按 `PROVIDER_<N>_*` 格式填入配置：
+编辑 `.env`：
 
 ```env
 PROVIDER_1_NAME=Copilot Claude
 PROVIDER_1_PREFIX=cp
-PROVIDER_1_BASE_URL=http://copilot-anthropic:4142
 PROVIDER_1_API_KEY=not-needed
 PROVIDER_1_MODELS=claude-opus-4.8,claude-fable-5
 
 PROVIDER_2_NAME=DeepSeek
 PROVIDER_2_PREFIX=ds
 PROVIDER_2_BASE_URL=https://api.deepseek.com/anthropic
-PROVIDER_2_API_KEY=sk-your-key-here
+PROVIDER_2_API_KEY=sk-your-key
 PROVIDER_2_MODELS=deepseek-v4-pro,deepseek-v4-flash
 ```
 
-### 3. 获取 GitHub Copilot Token
+### 2. 获取 GitHub Copilot Token
 
 ```bash
 podman run --rm -it \
@@ -81,85 +69,57 @@ podman run --rm -it \
   bun run auth.js
 ```
 
-按提示打开 GitHub 验证页面，完成后 token 自动保存。
+按提示打开 GitHub 验证页面。
 
-### 4. 启动服务
+### 3. 启动
 
 ```bash
 podman compose up -d
 ```
 
-首次启动会自动 pull 镜像、构建 proxy、注册所有 provider。启动后会在项目 `out/` 目录生成 Claude Code 配置文件。
+启动后自动生成 `out/claude-code-settings.json`。若未完成步骤 2，启动会报错并提示登录。
 
-### 5. 验证
+### 4. 验证
 
 ```bash
 curl -X POST http://localhost:3456/v1/messages \
   -H "Content-Type: application/json" \
-  -H "x-api-key: x" \
-  -d '{"model":"cp/claude-opus-4.8","max_tokens":50,"messages":[{"role":"user","content":"say hi"}]}'
+  -d '{"model":"cp/claude-opus-4.8","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
-## 在 Claude Code 中使用
+## Claude Code 配置
 
-启动后会自动生成 `out/claude-code-settings.json`，复制到 Claude Code 配置目录即可：
+将 `out/claude-code-settings.json` 复制到 Claude Code 配置目录，或直接设置：
 
 ```json
-{
-  "apiKey": "x",
-  "baseUrl": "http://localhost:3456/v1",
-  "model": "cp/claude-opus-4.8"
-}
+{ "apiKey": "x", "baseUrl": "http://localhost:3456/v1", "model": "cp/claude-opus-4.8" }
 ```
-
-`_availableModels` 字段列出了所有可用模型，可按需切换 `model` 值。
-
-## 自定义 Provider
-
-在 `.env` 中追加新的 `PROVIDER_<N>_*` 变量：
-
-```env
-PROVIDER_3_NAME=My API
-PROVIDER_3_PREFIX=my
-PROVIDER_3_BASE_URL=https://my-api.example.com/anthropic
-PROVIDER_3_API_KEY=sk-xxx
-PROVIDER_3_MODELS=model-a,model-b
-```
-
-重新运行 `podman compose up -d` 即可注册新 provider。
 
 ## 管理
 
 ```bash
-# 查看状态
-podman compose ps
-
-# 查看日志
-podman compose logs -f
-
-# 重启（修改 .env 后）
-podman compose up -d
+podman compose ps           # 状态
+podman compose logs -f      # 日志
+podman compose up -d        # 重启（修改 .env 后）
 ```
-
-9router Web 管理界面: [http://localhost:3456](http://localhost:3456)（默认密码 `123456`）
 
 ## 项目结构
 
 ```
 .
-├── copilot-anthropic-proxy/   # Copilot → Anthropic 格式转换代理
+├── copilot-anthropic-proxy/
 │   ├── src/
-│   │   ├── index.ts           # Hono 服务入口
-│   │   ├── auth.ts            # Copilot token 管理
-│   │   ├── translate.ts       # Anthropic ↔ OpenAI 格式翻译
-│   │   └── types.ts           # 类型定义
-│   ├── models.conf            # 允许的 Copilot 模型列表
-│   ├── github_token           # Copilot 设备 token（gitignore）
+│   │   ├── index.ts        # 服务入口 + 路由
+│   │   ├── router.ts       # Provider 注册 + 模型解析
+│   │   ├── auth.ts         # Copilot token
+│   │   ├── translate.ts    # Anthropic ↔ OpenAI
+│   │   └── types.ts        # 类型
+│   ├── models.conf         # Copilot 模型白名单
+│   ├── github_token        # 设备 token（gitignore）
 │   ├── Dockerfile
 │   └── package.json
-├── docker-compose.yml         # 容器编排
-├── register-providers.sh      # 自动注册 + 生成 Claude Code 配置
-├── out/                       # 生成的配置文件（gitignore）
-├── .env.example               # Provider 配置模板
-└── .env                       # Provider 配置 + API Keys（gitignore）
+├── docker-compose.yml      # 单容器编排
+├── out/                    # 生成的 Claude Code 配置
+├── .env.example
+└── .env                    # Provider 配置（gitignore）
 ```
