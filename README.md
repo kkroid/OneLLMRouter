@@ -34,7 +34,6 @@ Claude Code CLI
 - **Podman** 或 **Docker** + Docker Compose
 - **代理 `127.0.0.1:1082`** — GitHub Copilot Claude 模型的 IP 区域限制（Clash/V2Ray）
 - **各 provider 的 API Key**
-- **GitHub Device Token** — Copilot 认证（见步骤 3）
 
 ## 部署步骤
 
@@ -60,26 +59,15 @@ PROVIDER_2_API_KEY=sk-your-key
 PROVIDER_2_MODELS=deepseek-v4-pro,deepseek-v4-flash
 ```
 
-### 2. 获取 GitHub Copilot Token
+### 2. 启动
 
 ```bash
-podman run --rm -it \
-  -v ./copilot-anthropic-proxy/github_token:/root/.local/share/copilot-api/github_token \
-  ghcr.io/ericc-ch/copilot-api:latest \
-  bun run auth.js
+podman compose up
 ```
 
-按提示打开 GitHub 验证页面。
+首次启动时若未配置 Copilot token，会自动弹出设备授权链接，打开网页输入验证码即可。之后会将 token 持久化到本地文件，后续启动无需重复授权。
 
-### 3. 启动
-
-```bash
-podman compose up -d
-```
-
-启动后自动生成 `out/claude-code-settings.json`。若未完成步骤 2，启动会报错并提示登录。
-
-### 4. 验证
+### 3. 验证
 
 ```bash
 curl -X POST http://localhost:3456/v1/messages \
