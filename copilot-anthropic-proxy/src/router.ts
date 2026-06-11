@@ -78,31 +78,24 @@ export function getCopilotProvider(): Provider | undefined {
 
 // ---------- Claude Code settings generation ----------
 export function generateSettings(outDir: string) {
-  const ids = getAllModelIds();
-
   const settings = {
     env: {
       ANTHROPIC_BASE_URL: "http://localhost:3456/v1",
       ANTHROPIC_AUTH_TOKEN: "x",
-      ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL || ids[0] || "",
-      ANTHROPIC_DEFAULT_OPUS_MODEL: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || ids[0] || "",
-      ANTHROPIC_DEFAULT_SONNET_MODEL: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || ids[1] || ids[0] || "",
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || ids[2] || ids[0] || "",
-      ANTHROPIC_DEFAULT_FABLE_MODEL: process.env.ANTHROPIC_DEFAULT_FABLE_MODEL || ids[3] || ids[0] || "",
+      ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL || "",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || "",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || "",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || "",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       CLAUDE_CODE_EFFORT_LEVEL: "max",
     },
     theme: "dark",
     skipWorkflowUsageWarning: true,
-    _availableModels: ids.map(id => {
-      const p = modelMap.get(id);
-      return { id, name: (p?.name || "") + " " + id.split("/")[1] };
-    }),
   };
 
   const path = outDir.replace(/\/$/, "") + "/claude-code-settings.json";
   writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
-  console.log("Generated", path, "with", ids.length, "models");
+  console.log("Generated", path);
 }
 
 // ---------- Startup check ----------
