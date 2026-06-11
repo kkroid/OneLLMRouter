@@ -78,17 +78,16 @@ export function getCopilotProvider(): Provider | undefined {
 // ---------- Claude Code settings generation ----------
 export function generateSettings(outDir: string) {
   const ids = getAllModelIds();
-  const pick = (n: number) => ids[n] || ids[0] || "";
-  const anyKey = "x";
 
   const settings = {
     env: {
       ANTHROPIC_BASE_URL: "http://localhost:3456/v1",
-      ANTHROPIC_AUTH_TOKEN: anyKey,
-      ANTHROPIC_MODEL: pick(0),
-      ANTHROPIC_DEFAULT_OPUS_MODEL: pick(0),
-      ANTHROPIC_DEFAULT_SONNET_MODEL: pick(1),
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: pick(ids.length > 1 ? 1 : 0),
+      ANTHROPIC_AUTH_TOKEN: "x",
+      ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL || ids[0] || "",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || ids[0] || "",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || ids[1] || ids[0] || "",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || ids[2] || ids[0] || "",
+      ANTHROPIC_DEFAULT_FABLE_MODEL: process.env.ANTHROPIC_DEFAULT_FABLE_MODEL || ids[3] || ids[0] || "",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       CLAUDE_CODE_EFFORT_LEVEL: "max",
     },
