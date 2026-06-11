@@ -1,11 +1,4 @@
 import { readFile, access, writeFile } from "node:fs/promises";
-import { ProxyAgent, setGlobalDispatcher } from "undici";
-
-// Route all fetch() through the proxy
-if (process.env.https_proxy || process.env.http_proxy) {
-  const uri = process.env.https_proxy || process.env.http_proxy!;
-  setGlobalDispatcher(new ProxyAgent({ uri, requestTls: { rejectUnauthorized: false } }));
-}
 
 let cachedToken: string | null = null;
 let cachedApiBase: string | null = null;
@@ -72,6 +65,8 @@ export async function checkTokenAvailable(): Promise<boolean> {
 // ---- Device login ----
 export async function deviceLogin(): Promise<string> {
   const tokenFile = process.env.GITHUB_TOKEN_FILE!;
+  const proxy = process.env.https_proxy || process.env.http_proxy || "none";
+  console.log("   proxy:", proxy);
 
   const res1 = await fetch("https://github.com/login/device/code", {
     method: "POST",

@@ -151,7 +151,7 @@ async function main() {
     try {
       await deviceLogin();
     } catch (e: any) {
-      console.log("⚠ 自动登录失败:", e.message);
+      console.log("⚠ 自动登录失败:", e.message || e.cause || e);
       console.log("   手动获取 token:");
       console.log("   podman run --rm -it -v ./copilot-anthropic-proxy/github_token:/root/.local/share/copilot-api/github_token ghcr.io/ericc-ch/copilot-api:latest bun run auth.js\n");
     }
