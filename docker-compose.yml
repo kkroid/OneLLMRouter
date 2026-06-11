@@ -10,7 +10,6 @@ services:
       - PORT=3456
       - OUT_DIR=/out
       - GITHUB_TOKEN_FILE=/host-config/github_token
-      - MODELS_CONF=/host-config/models.conf
       - http_proxy=http://host.containers.internal:1082
       - https_proxy=http://host.containers.internal:1082
     ports:

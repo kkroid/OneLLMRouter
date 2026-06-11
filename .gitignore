@@ -19,6 +19,9 @@ tmp/
 .DS_Store
 Thumbs.db
 
+# Claude Code 本地配置（含代理设置）
+.claude/settings.local.json
+
 # IDE
 .vscode/
 .idea/

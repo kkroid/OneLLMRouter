@@ -2,12 +2,11 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
-import { readFile } from "node:fs/promises";
 
 import { getToken, getApiBase, deviceLogin } from "./auth";
 import {
   translateRequest, translateResponse, translateStreamChunk,
-  setAllowedModels, type StreamContext,
+  type StreamContext,
 } from "./translate";
 import { parseProviders, resolveModel, getAllModelIds, generateSettings, requiresToken, getCopilotProvider } from "./router";
 
@@ -15,7 +14,6 @@ const app = new Hono();
 app.use(cors());
 
 const PORT = parseInt(process.env.PORT || "3456");
-const MODELS_CONF = process.env.MODELS_CONF || "./models.conf";
 const OUT_DIR = process.env.OUT_DIR || "./out";
 
 const BASE_HEADERS: Record<string, string> = {
@@ -27,17 +25,6 @@ const BASE_HEADERS: Record<string, string> = {
   "editor-plugin-version": "copilot-chat/0.26.7",
   "copilot-vision-request": "true",
 };
-
-async function loadModelList() {
-  try {
-    const content = await readFile(MODELS_CONF, "utf-8");
-    const models = content.split("\n").map(l => l.replace(/#.*/, "").trim()).filter(l => l.length > 0);
-    setAllowedModels(models);
-    console.log("Copilot models:", models);
-  } catch {
-    console.log("No models.conf, using provider config only");
-  }
-}
 
 // ---- Routes ----
 app.get("/", (c) => c.text("OneCC Proxy — OK"));
@@ -137,8 +124,6 @@ async function main() {
   const prefixes = providers.map(p => p.prefix).join(", ");
   console.log("Providers:", prefixes || "none");
   console.log("Models:", getAllModelIds().join(", "));
-
-  await loadModelList();
 
   // Start server immediately, don't block on auth
   serve({ fetch: app.fetch, port: PORT }, (info) => {

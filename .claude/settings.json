@@ -1,8 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(podman *)",
-      "Bash(docker *)",
+      "Bash(go *)",
+      "Bash(cmake *)",
+      "Bash(make *)",
       "Bash(curl *)",
       "Bash(git *)",
       "Bash(ls *)",
@@ -22,10 +23,13 @@
       "Bash(echo *)",
       "Bash(wget *)",
       "Bash(env *)",
-      "Bash(npm *)",
-      "Bash(npx *)",
+      "Bash(nproc *)",
+      "Bash(protoc *)",
+      "Bash(grpcurl *)",
       "Bash(node *)",
-      "Bash(tsx *)",
+      "Bash(npm *)",
+      "Bash(podman *)",
+      "Bash(docker *)",
       "Read(*)",
       "Write(*)",
       "Edit(*)",
@@ -43,8 +47,9 @@
       "Bash(> /dev/sda*)",
       "Bash(dd if=*)",
       "Bash(chmod 777 *)",
-      "Bash(docker system prune *)",
-      "Bash(podman system prune *)"
+      "Bash(go clean -cache && go clean -modcache)",
+      "Bash(rm -rf %GOPATH%*)",
+      "Bash(rm -rf $GOPATH*)"
     ]
   },
   "hooks": {
