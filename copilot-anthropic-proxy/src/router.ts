@@ -71,6 +71,10 @@ export function getAllModelIds(): string[] {
   return [...modelMap.keys()];
 }
 
+export function getCopilotProvider(): Provider | undefined {
+  return providers.find(p => p.prefix === "cp");
+}
+
 // ---------- Claude Code settings generation ----------
 export function generateSettings(outDir: string) {
   const models = getAllModelIds().map(id => {
