@@ -1,4 +1,11 @@
 import { readFile, access, writeFile } from "node:fs/promises";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
+
+// Route all fetch() through the proxy
+if (process.env.https_proxy || process.env.http_proxy) {
+  const uri = process.env.https_proxy || process.env.http_proxy!;
+  setGlobalDispatcher(new ProxyAgent({ uri, requestTls: { rejectUnauthorized: false } }));
+}
 
 let cachedToken: string | null = null;
 let cachedApiBase: string | null = null;
