@@ -79,7 +79,7 @@ export function getCopilotProvider(): Provider | undefined {
 export function generateSettings(outDir: string) {
   const ids = getAllModelIds();
   const pick = (n: number) => ids[n] || ids[0] || "";
-  const anyKey = providers.find(p => p.apiKey && p.apiKey !== "not-needed")?.apiKey || "x";
+  const anyKey = "x";
 
   const settings = {
     env: {
