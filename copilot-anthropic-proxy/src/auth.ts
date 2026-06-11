@@ -1,10 +1,13 @@
 import { readFile, access, writeFile } from "node:fs/promises";
+import { curlRequest } from "./curl";
 
 let cachedToken: string | null = null;
-let cachedApiBase: string | null = null;
+let cachedExp = 0;
 
 const COPILOT_CLIENT_ID = "Iv1.b507a08c87ecfe98";
 const UA = "GitHubCopilotChat/0.26.7";
+// Fixed endpoint — the individual.* subdomain hides Claude models.
+const API_BASE = "https://api.githubcopilot.com";
 
 async function getGitHubToken(): Promise<string> {
   const path = process.env.GITHUB_TOKEN_FILE || process.env.GITHUB_TOKEN;
@@ -16,38 +19,31 @@ async function getGitHubToken(): Promise<string> {
 }
 
 export async function getToken(): Promise<string> {
-  if (cachedToken) {
-    try {
-      const res = await fetch(`${getApiBase()}/models`, {
-        headers: { "Authorization": `Bearer ${cachedToken}` },
-        signal: AbortSignal.timeout(3000),
-      });
-      if (res.ok) return cachedToken;
-    } catch { /* expired */ }
-  }
+  // Copilot token embeds exp=<unix>; refresh a bit early.
+  if (cachedToken && Date.now() / 1000 < cachedExp - 120) return cachedToken;
 
   const gh = await getGitHubToken();
-  const res = await fetch("https://api.github.com/copilot_internal/v2/token", {
+  const res = await curlRequest("https://api.github.com/copilot_internal/v2/token", {
     headers: {
       "Authorization": `token ${gh}`,
       "Accept": "application/json",
       "User-Agent": UA,
-      "editor-version": "vscode/1.104.1",
-      "Copilot-Integration-Id": "vscode-chat",
       "Editor-Version": "vscode/1.104.1",
       "Editor-Plugin-Version": "copilot-chat/0.26.7",
-      "copilot-vision-request": "true",
+      "Copilot-Integration-Id": "vscode-chat",
     },
   });
-  if (!res.ok) throw new Error(`Token request failed: ${res.status}`);
-  const data = await res.json() as { token: string; endpoints: { api: string } };
+  if (res.status !== 200) throw new Error(`Token request failed: ${res.status} ${res.body.slice(0, 200)}`);
+  const data = JSON.parse(res.body) as { token: string; expires_at?: number };
   cachedToken = data.token;
-  cachedApiBase = data.endpoints.api;
+  // token string contains exp=<unix>; prefer that, fall back to expires_at
+  const m = data.token.match(/exp=(\d+)/);
+  cachedExp = m ? parseInt(m[1]) : (data.expires_at || Date.now() / 1000 + 1500);
   return cachedToken;
 }
 
 export function getApiBase(): string {
-  return cachedApiBase || "https://api.githubcopilot.com";
+  return API_BASE;
 }
 
 export async function checkTokenAvailable(): Promise<boolean> {
@@ -66,33 +62,31 @@ export async function checkTokenAvailable(): Promise<boolean> {
 export async function deviceLogin(): Promise<string> {
   const tokenFile = process.env.GITHUB_TOKEN_FILE!;
 
-  const res1 = await fetch("https://github.com/login/device/code", {
+  const res1 = await curlRequest("https://github.com/login/device/code", {
     method: "POST",
-    headers: { "Accept": "application/json", "User-Agent": UA },
-    body: new URLSearchParams({ client_id: COPILOT_CLIENT_ID, scope: "read:user" }),
-    signal: AbortSignal.timeout(10000),
+    headers: { "Accept": "application/json", "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: COPILOT_CLIENT_ID, scope: "read:user" }).toString(),
   });
-  if (!res1.ok) throw new Error(`Device code request failed: ${res1.status}`);
-  const dc = await res1.json() as { device_code: string; user_code: string; verification_uri: string; interval: number };
+  if (res1.status !== 200) throw new Error(`Device code request failed: ${res1.status}`);
+  const dc = JSON.parse(res1.body) as { device_code: string; user_code: string; verification_uri: string; interval: number };
 
   console.log("\n🔑 请打开以下链接完成 GitHub 设备授权：");
   console.log(`   ${dc.verification_uri}`);
   console.log(`   输入验证码: ${dc.user_code}\n`);
 
-  // Poll for completion
   const interval = (dc.interval || 5) * 1000;
   while (true) {
     await new Promise(r => setTimeout(r, interval));
-    const res2 = await fetch("https://github.com/login/oauth/access_token", {
+    const res2 = await curlRequest("https://github.com/login/oauth/access_token", {
       method: "POST",
-      headers: { "Accept": "application/json", "User-Agent": UA },
+      headers: { "Accept": "application/json", "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         client_id: COPILOT_CLIENT_ID,
         device_code: dc.device_code,
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      }),
+      }).toString(),
     });
-    const data = await res2.json() as { access_token?: string; error?: string };
+    const data = JSON.parse(res2.body) as { access_token?: string; error?: string };
     if (data.access_token) {
       await writeFile(tokenFile, data.access_token + "\n");
       console.log("✅ GitHub 授权成功\n");

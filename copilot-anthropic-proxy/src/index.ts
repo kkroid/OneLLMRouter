@@ -2,8 +2,10 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
+import { randomUUID } from "node:crypto";
 
 import { getToken, getApiBase, deviceLogin } from "./auth";
+import { curlRequest, curlStream } from "./curl";
 import {
   translateRequest, translateResponse, translateStreamChunk,
   type StreamContext,
@@ -17,13 +19,10 @@ const PORT = parseInt(process.env.PORT || "3456");
 const OUT_DIR = process.env.OUT_DIR || "./out";
 
 const BASE_HEADERS: Record<string, string> = {
-  "Copilot-Integration-Id": "vscode-chat",
-  "User-Agent": "GitHubCopilotChat/0.26.7",
-  "Editor-Version": "vscode/1.104.1",
-  "Editor-Plugin-Version": "copilot-chat/0.26.7",
+  "copilot-integration-id": "vscode-chat",
+  "user-agent": "GitHubCopilotChat/0.26.7",
   "editor-version": "vscode/1.104.1",
   "editor-plugin-version": "copilot-chat/0.26.7",
-  "copilot-vision-request": "true",
 };
 
 // ---- Routes ----
@@ -42,23 +41,25 @@ async function copilotHandler(c: any, resolved: { model: string }) {
   body.model = resolved.model;
   const openaiReq = translateRequest(body);
 
-  const headers = { ...BASE_HEADERS, "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
+  const headers = {
+    ...BASE_HEADERS,
+    "authorization": `Bearer ${token}`,
+    "content-type": "application/json",
+    "x-request-id": randomUUID(),
+  };
 
   if (!openaiReq.stream) {
-    const res = await fetch(`${getApiBase()}/chat/completions`, { method: "POST", headers, body: JSON.stringify(openaiReq) });
-    if (!res.ok) return c.json({ error: { message: await res.text(), type: "api_error" } }, 500);
-    return c.json(translateResponse(await res.json(), body.model));
+    const res = await curlRequest(`${getApiBase()}/chat/completions`, { method: "POST", headers, body: JSON.stringify(openaiReq) });
+    if (res.status !== 200) return c.json({ error: { message: res.body, type: "api_error" } }, 500);
+    return c.json(translateResponse(JSON.parse(res.body), body.model));
   }
 
   return streamSSE(c, async (stream) => {
     const ctx: StreamContext = { messageStartSent: false, messageId: `msg_${Date.now()}`, model: body.model, contentBlockIndex: 0, contentBlockOpen: false, toolCalls: {} };
-    const res = await fetch(`${getApiBase()}/chat/completions`, { method: "POST", headers, body: JSON.stringify({ ...openaiReq, stream: true }) });
-    if (!res.ok) { await stream.writeSSE({ data: JSON.stringify({ type: "error", error: await res.text() }) }); return; }
-    const reader = res.body?.getReader(); if (!reader) return;
-    const decoder = new TextDecoder(); let buffer = "";
-    while (true) {
-      const { done, value } = await reader.read(); if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    const { stream: curlOut } = curlStream(`${getApiBase()}/chat/completions`, { method: "POST", headers, body: JSON.stringify({ ...openaiReq, stream: true }) });
+    let buffer = "";
+    for await (const chunk of curlOut) {
+      buffer += chunk;
       const lines = buffer.split("\n"); buffer = lines.pop() || "";
       for (const line of lines) {
         const t = line.trim(); if (!t || !t.startsWith("data: ")) continue;
