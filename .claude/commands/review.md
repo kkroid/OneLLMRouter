@@ -1,5 +1,5 @@
 ---
-description: Go + C++ 双语言代码审查，聚焦 Go 错误处理/goroutine 安全 + C++ 内存安全/gRPC 正确性
+description: Go 代码审查，聚焦错误处理、goroutine 安全、SSE 规范、协议翻译正确性
 allowed-tools: Read(*), Grep(*), Glob(*), Bash(git:*)
 argument-hint: [file1.go file2.cpp ...] [--full]
 ---
