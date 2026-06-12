@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -38,6 +39,17 @@ func init() {
 	}
 }
 
+func configPath() string {
+	if cfgFile != "" {
+		return cfgFile
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "onecc-router.yaml"
+	}
+	return filepath.Join(filepath.Dir(exe), "onecc-router.yaml")
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "onecc-router",
@@ -48,7 +60,7 @@ Anthropic-compatible APIs behind a single Anthropic Messages API endpoint.`,
 		RunE:    serveCmd().RunE,
 	}
 
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "onecc-router.yaml", "config file path")
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file path (default: onecc-router.yaml next to exe)")
 	rootCmd.PersistentFlags().StringVar(&pidFile, "pid", "", "pid file path (default ~/.onecc/onecc-router.pid)")
 	rootCmd.PersistentFlags().BoolVarP(&daemon, "daemon", "d", false, "run in background (detach from terminal)")
 
@@ -71,7 +83,7 @@ func serveCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Start the proxy daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cfgFile)
+			cfg, err := config.Load(configPath())
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
@@ -176,7 +188,7 @@ func statusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Check daemon status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cfgFile)
+			cfg, err := config.Load(configPath())
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
@@ -369,14 +381,20 @@ func installCmd() *cobra.Command {
 			}
 			defer k.Close()
 			cmdLine := fmt.Sprintf(`"%s" --daemon`, exePath)
-			if cfgFile != "onecc-router.yaml" {
-				cmdLine += fmt.Sprintf(` --config "%s"`, cfgFile)
-			}
 			if err := k.SetStringValue("OneCCRouter", cmdLine); err != nil {
 				return fmt.Errorf("set registry: %w", err)
 			}
 			fmt.Println("✅ 已注册开机启动")
 			fmt.Printf("   命令: %s\n", cmdLine)
+
+			// Auto-start immediately
+			fmt.Print("正在启动... ")
+			cfgPath := configPath()
+			if err := exec.Command(exePath, "--daemon", "--config", cfgPath).Start(); err != nil {
+				fmt.Printf("失败: %v\n", err)
+			} else {
+				fmt.Println("完成")
+			}
 			return nil
 		},
 	}
