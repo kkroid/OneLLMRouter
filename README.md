@@ -73,6 +73,7 @@ providers:
     prefix: "ds"
     base_url: "https://api.deepseek.com/anthropic"
     api_key: "sk-your-deepseek-key"
+    proxy: false           # 国内直连，不走代理
     models:
       - "deepseek-v4-pro[1m]"
       - "deepseek-v4-flash[1m]"
@@ -181,6 +182,7 @@ proxy:
 providers:
   - name: "GitHub Copilot"
     prefix: "cp"
+    # cp 前缀无需 api_key (OAuth), 默认走代理
     api_key: "not-needed"
     models: ["claude-opus-4.8", "claude-fable-5"]
 
@@ -188,7 +190,13 @@ providers:
     prefix: "ds"
     base_url: "https://api.deepseek.com/anthropic"
     api_key: "sk-your-key"
+    proxy: false
     models: ["deepseek-v4-pro[1m]", "deepseek-v4-flash[1m]"]
+```
+
+每个 provider 可设置 `proxy`：`true` 走代理，`false` 直连，不填则继承全局设置。Copilot API 有 IP 区域限制必须走代理，国内服务如 DeepSeek 直连更快。
+
+### onecc-router.yaml
 
 model_slots:
   default: "ds/deepseek-v4-pro[1m]"
