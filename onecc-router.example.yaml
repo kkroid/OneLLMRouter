@@ -26,6 +26,7 @@ providers:
     prefix: "ds"
     base_url: "https://api.deepseek.com/anthropic"
     api_key: "sk-your-deepseek-key"
+    proxy: false           # 国内直连，不走代理
     models:
       - "deepseek-v4-pro[1m]"
       - "deepseek-v4-flash[1m]"

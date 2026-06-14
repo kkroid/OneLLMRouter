@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net"
 	"os"
 	"os/signal"
 	"sync"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -30,7 +30,6 @@ import (
 
 var (
 	cfgFile string
-	pidFile string
 	daemon   bool
 	noPidLock bool
 	version string // set via ldflags: -X main.version=1.0.0
@@ -64,7 +63,6 @@ Anthropic-compatible APIs behind a single Anthropic Messages API endpoint.`,
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file path (default: onecc-router.yaml next to exe)")
-	rootCmd.PersistentFlags().StringVar(&pidFile, "pid", "", "pid file path (default ~/.onecc/onecc-router.pid)")
 	rootCmd.PersistentFlags().BoolVarP(&daemon, "daemon", "d", false, "run in background")
 	rootCmd.PersistentFlags().BoolVar(&noPidLock, "no-pid", false, "allow multiple instances (skip PID lock)")
 
@@ -96,21 +94,15 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("配置校验失败: %w", err)
 			}
 
-			// PID file
-			pidPath := pidFile
-			if pidPath == "" {
-				pidPath = filepath.Join(config.DefaultOneccDir(), "onecc-router.pid")
-			}
-			os.MkdirAll(filepath.Dir(pidPath), 0755)
+			httpAddr := net.JoinHostPort(cfg.Server.Host, fmt.Sprintf("%d", cfg.Server.HTTPPort))
 			if !noPidLock {
-				if existing, err := os.ReadFile(pidPath); err == nil {
-				return fmt.Errorf("已在运行 (PID %s)\n  如需多实例: --no-pid %s", strings.TrimSpace(string(existing)), pidPath)
+				if conn, err := net.DialTimeout("tcp", httpAddr, 500*time.Millisecond); err == nil {
+					conn.Close()
+					return fmt.Errorf("port %s is in use", httpAddr)
+				}
 			}
-			}
-			os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
-			defer os.Remove(pidPath)
 
-			logCfg := oneccLog.FromConfig(cfg.Log.Level, cfg.Log.Dir, cfg.Log.MaxAgeDays)
+						logCfg := oneccLog.FromConfig(cfg.Log.Level, cfg.Log.Dir, cfg.Log.MaxAgeDays)
 			logger, cleanup, err := oneccLog.Setup(logCfg)
 			if err != nil {
 				return fmt.Errorf("setup logger: %w", err)
@@ -141,7 +133,11 @@ func serveCmd() *cobra.Command {
 				fmt.Fprint(os.Stderr, "✅ 登录成功，启动服务...\n")
 			}
 
-			proxyHandler := proxy.NewHandler(resolver, tokenMgr, httpClient, logger)
+			directClient, err := makeHTTPClient("")
+			if err != nil {
+				return fmt.Errorf("create direct client: %w", err)
+			}
+			proxyHandler := proxy.NewHandler(resolver, tokenMgr, httpClient, directClient, logger)
 			proxyHandler.ErrorHook = ui.ErrorNotify
 
 			logger.Info("onecc-router starting",
@@ -163,7 +159,6 @@ func serveCmd() *cobra.Command {
 			mux := http.NewServeMux()
 			registerRoutes(mux, resolver, proxyHandler, tokenMgr, cfg, logger)
 
-			httpAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.HTTPPort)
 			httpServer := &http.Server{Addr: httpAddr, Handler: withRequestID(mux, logger)}
 
 			go func() {

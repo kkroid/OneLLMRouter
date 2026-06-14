@@ -43,6 +43,7 @@ type ProviderConfig struct {
 	BaseURL string   `yaml:"base_url"`
 	APIKey  string   `yaml:"api_key"`
 	Models  []string `yaml:"models"`
+	Proxy   *bool   `yaml:"proxy,omitempty"` // nil=inherit global, true=use proxy, false=direct
 }
 
 // ModelSlotsConfig maps Claude Code model slots to "prefix/model" identifiers.

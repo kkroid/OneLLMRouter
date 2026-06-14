@@ -30,19 +30,28 @@ var copilotHeaders = map[string]string{
 type Handler struct {
 	Resolver     *router.Resolver
 	TokenManager *auth.TokenManager
-	HTTPClient   *http.Client
+	ProxyClient  *http.Client // requests through SOCKS5 proxy
+	DirectClient *http.Client // requests without proxy
 	Logger       *slog.Logger
-	ErrorHook    func(title, msg string) // called on 5xx/429 errors (optional)
+	ErrorHook    func(title, msg string)
 }
 
 // NewHandler creates a proxy Handler.
-func NewHandler(resolver *router.Resolver, tokenMgr *auth.TokenManager, httpClient *http.Client, logger *slog.Logger) *Handler {
+func NewHandler(resolver *router.Resolver, tokenMgr *auth.TokenManager, proxyClient, directClient *http.Client, logger *slog.Logger) *Handler {
 	return &Handler{
 		Resolver:     resolver,
 		TokenManager: tokenMgr,
-		HTTPClient:   httpClient,
+		ProxyClient:  proxyClient,
+		DirectClient: directClient,
 		Logger:       logger,
 	}
+}
+
+func (h *Handler) clientFor(p *router.Provider) *http.Client {
+	if p.ShouldUseProxy() {
+		return h.ProxyClient
+	}
+	return h.DirectClient
 }
 
 // ServeHTTP implements the unified /v1/messages handler.
@@ -138,7 +147,7 @@ func (h *Handler) copilotHandler(w http.ResponseWriter, r *http.Request, body *t
 
 	if !body.Stream {
 		// Non-streaming
-		resp, err := h.HTTPClient.Do(req)
+		resp, err := h.ProxyClient.Do(req)
 		if err != nil {
 			h.writeError(w, http.StatusBadGateway, "copilot api: "+err.Error())
 			return
@@ -164,7 +173,7 @@ func (h *Handler) copilotHandler(w http.ResponseWriter, r *http.Request, body *t
 
 	// Streaming
 	req.Header.Set("Accept", "text/event-stream")
-	resp, err := h.HTTPClient.Do(req)
+	resp, err := h.ProxyClient.Do(req)
 	if err != nil {
 		h.writeError(w, http.StatusBadGateway, "copilot api stream: "+err.Error())
 		return
@@ -260,7 +269,7 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 	req.Header.Set("x-api-key", apiKey)
 
 	if !body.Stream {
-		resp, err := h.HTTPClient.Do(req)
+		resp, err := h.clientFor(resolved.Provider).Do(req)
 		if err != nil {
 			h.writeError(w, http.StatusBadGateway, "external api: "+err.Error())
 			return
@@ -279,7 +288,7 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 	}
 
 	// Streaming — direct SSE passthrough
-	resp, err := h.HTTPClient.Do(req)
+	resp, err := h.clientFor(resolved.Provider).Do(req)
 	if err != nil {
 		h.writeError(w, http.StatusBadGateway, "external api stream: "+err.Error())
 		return

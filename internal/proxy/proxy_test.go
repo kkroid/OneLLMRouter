@@ -158,7 +158,7 @@ func TestHandler_NonStreamThroughMiddleware(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "ds", Name: "DeepSeek", BaseURL: mockAPI.URL, APIKey: "sk-test", Models: []string{"m1"}},
 	})
-	h := &Handler{Resolver: resolver, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"ds/m1","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -190,7 +190,7 @@ func TestHandler_ExternalSSEPassthrough(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "ds", Name: "DS", BaseURL: mockAPI.URL, APIKey: "k", Models: []string{"m1"}},
 	})
-	h := &Handler{Resolver: resolver, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"ds/m1","max_tokens":5,"stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -229,7 +229,7 @@ func TestHandler_CopilotStream_Basic(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
 	})
-	h := &Handler{Resolver: resolver, TokenManager: tm, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, TokenManager: tm, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"cp/claude-opus-4.8","max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -278,7 +278,7 @@ func TestHandler_CopilotStream_ToolCalls(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
 	})
-	h := &Handler{Resolver: resolver, TokenManager: tm, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, TokenManager: tm, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"cp/claude-opus-4.8","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"weather in beijing"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -321,7 +321,7 @@ func TestSSEOutputFormat_AllEventsHaveEventLine(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
 	})
-	h := &Handler{Resolver: resolver, TokenManager: tm, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, TokenManager: tm, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"cp/claude-opus-4.8","max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -380,7 +380,7 @@ func TestExternalPassthrough_AnyFormat(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "ds", Name: "DS", BaseURL: mockAPI.URL, APIKey: "k", Models: []string{"m1"}},
 	})
-	h := &Handler{Resolver: resolver, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"ds/m1","max_tokens":5,"stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -452,7 +452,7 @@ func TestHandler_SystemStringFormat(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "ds", Name: "DS", BaseURL: mockAPI.URL, APIKey: "k", Models: []string{"m1"}},
 	})
-	h := &Handler{Resolver: resolver, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"ds/m1","max_tokens":5,"system":"you are helpful","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -471,7 +471,7 @@ func TestHandler_SystemArrayFormat(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "ds", Name: "DS", BaseURL: mockAPI.URL, APIKey: "k", Models: []string{"m1"}},
 	})
-	h := &Handler{Resolver: resolver, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"ds/m1","max_tokens":5,"system":[{"type":"text","text":"you are helpful"}],"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -496,7 +496,7 @@ func TestHandler_ContextCancel(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "ds", Name: "DS", BaseURL: mockAPI.URL, APIKey: "k", Models: []string{"m1"}},
 	})
-	h := &Handler{Resolver: resolver, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"ds/m1","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -525,7 +525,7 @@ func TestHandler_CopilotError(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{
 		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
 	})
-	h := &Handler{Resolver: resolver, TokenManager: tm, HTTPClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	h := &Handler{Resolver: resolver, TokenManager: tm, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
 	body := `{"model":"cp/claude-opus-4.8","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
