@@ -142,10 +142,11 @@ func (t *Tray) showMenu() {
 }
 
 func (t *Tray) doRestart() {
-	exe, _ := os.Executable()
-	exeW, _ := windows.UTF16PtrFromString(exe)
+	exePath, _ := os.Executable()
+	exeW, _ := windows.UTF16PtrFromString(exePath)
+	argsW, _ := windows.UTF16PtrFromString("--daemon")
 	sh32 := windows.NewLazySystemDLL("shell32.dll")
-	sh32.NewProc("ShellExecuteW").Call(0, 0, uintptr(unsafe.Pointer(exeW)), 0, 0, 1)
+	sh32.NewProc("ShellExecuteW").Call(0, 0, uintptr(unsafe.Pointer(exeW)), uintptr(unsafe.Pointer(argsW)), 0, 0)
 	t.doQuit()
 }
 
