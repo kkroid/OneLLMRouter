@@ -389,16 +389,23 @@ func installCmd() *cobra.Command {
 			}
 			k, err := registry.OpenKey(registry.CURRENT_USER,
 				`Software\Microsoft\Windows\CurrentVersion\Run`,
-				registry.SET_VALUE)
+				registry.QUERY_VALUE|registry.SET_VALUE)
 			if err != nil {
 				return fmt.Errorf("open registry: %w", err)
 			}
 			defer k.Close()
 			cmdLine := fmt.Sprintf(`"%s" --daemon`, exePath)
-			if err := k.SetStringValue("OneCCRouter", cmdLine); err != nil {
-				return fmt.Errorf("set registry: %w", err)
+
+			// Check if already registered
+			existing, _, _ := k.GetStringValue("OneCCRouter")
+			if existing == cmdLine {
+				fmt.Println("✅ 已注册开机启动 (无需重复注册)")
+			} else {
+				if err := k.SetStringValue("OneCCRouter", cmdLine); err != nil {
+					return fmt.Errorf("set registry: %w", err)
+				}
+				fmt.Println("✅ 已注册开机启动")
 			}
-			fmt.Println("✅ 已注册开机启动")
 			fmt.Printf("   命令: %s\n", cmdLine)
 
 			// Auto-start immediately
