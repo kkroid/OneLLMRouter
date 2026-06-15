@@ -3,7 +3,7 @@ param(
     [switch]$Clean,
     [switch]$TestOnly,
     [switch]$Install,
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.1.0"
 )
 
 $ErrorActionPreference = "Stop"

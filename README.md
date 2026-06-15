@@ -39,7 +39,7 @@ git clone https://github.com/kkroid/OneCCRouter.git && cd OneCCRouter
 pwsh build.ps1 -Version "1.0.0"
 ```
 
-产物在 `dist/onecc-router-v1.0.0.exe`。
+产物在 `dist/onecc-router-v1.1.0.exe`。
 
 ### 2. 配置
 
@@ -89,7 +89,7 @@ model_slots:
 ### 3. 启动
 
 ```bash
-.\dist\onecc-router-v1.0.0.exe
+.\dist\onecc-router-v1.1.0.exe
 ```
 
 启动时会打印 Claude Code 的 `settings.json`，直接复制使用。如果配置了 Copilot 但未登录，会自动弹出 GitHub 设备授权流程。Token 保存在 `~/.onecc/github_token`。

@@ -134,7 +134,7 @@ OneCCRouter/
 pwsh build.ps1 -Version "1.0.0"
 
 # 手动编译
-go build -ldflags="-s -w -X main.version=1.0.0" -o dist/onecc-router-v1.0.0.exe ./cmd/onecc-router/
+go build -ldflags="-s -w -X main.version=1.1.0" -o dist/onecc-router-v1.1.0.exe ./cmd/onecc-router/
 
 # 测试
 go test ./...
@@ -169,7 +169,7 @@ go test ./...
 
 ```bash
 # 1. 启动
-./dist/onecc-router-v1.0.0.exe
+./dist/onecc-router-v1.1.0.exe
 
 # 2. 健康检查
 curl http://localhost:3456/health
