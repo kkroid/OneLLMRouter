@@ -375,3 +375,224 @@ func (tw *ttfbWriter) Flush() {
 		f.Flush()
 	}
 }
+
+// ServeOpenAI handles OpenAI-format /v1/chat/completions requests.
+func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var body translate.OpenAIRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+
+	fullModel := body.Model
+	if fullModel == "" {
+		cp := h.Resolver.CopilotProvider()
+		if cp != nil && len(cp.Models) > 0 {
+			body.Model = cp.Models[0]
+			h.openaiCopilotHandler(w, r, &body)
+			return
+		}
+		h.writeError(w, http.StatusBadRequest, "no model specified")
+		return
+	}
+
+	resolved := h.Resolver.Resolve(fullModel)
+	if resolved == nil {
+		models := h.Resolver.AllModelIDs()
+		h.writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("unknown model: %s. Available: %s", fullModel, strings.Join(models, ", ")))
+		return
+	}
+
+	meta := oneccLog.RequestMetaFromContext(r.Context())
+	meta.Model = fullModel
+	meta.Provider = resolved.Provider.Prefix
+	meta.Stream = body.Stream
+	w = &ttfbWriter{ResponseWriter: w, meta: meta}
+
+	if resolved.Provider.Prefix == "cp" {
+		body.Model = resolved.Model
+		h.openaiCopilotHandler(w, r, &body)
+	} else {
+		h.openaiExternalHandler(w, r, &body, resolved)
+	}
+}
+
+// openaiCopilotHandler proxies OpenAI requests directly to Copilot (no translation needed).
+func (h *Handler) openaiCopilotHandler(w http.ResponseWriter, r *http.Request, body *translate.OpenAIRequest) {
+	token, err := h.TokenManager.GetToken()
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "get token: "+err.Error())
+		return
+	}
+
+	apiBase := h.TokenManager.GetAPIBase()
+	url := apiBase + "/chat/completions"
+
+	reqBody, _ := json.Marshal(body)
+	timeout := 60 * time.Second
+	if body.Stream {
+		timeout = 300 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "create request: "+err.Error())
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range copilotHeaders {
+		req.Header.Set(k, v)
+	}
+
+	if !body.Stream {
+		resp, err := h.ProxyClient.Do(req)
+		if err != nil {
+			h.writeError(w, http.StatusBadGateway, "copilot api: "+err.Error())
+			return
+		}
+		defer resp.Body.Close()
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if resp.StatusCode != 200 {
+			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("copilot api error %d: %s", resp.StatusCode, string(respBody)))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(respBody)
+		return
+	}
+
+	// Streaming: OpenAI SSE passthrough
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := h.ProxyClient.Do(req)
+	if err != nil {
+		h.writeError(w, http.StatusBadGateway, "copilot api stream: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("copilot api stream error %d: %s", resp.StatusCode, string(respBody)))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			fmt.Fprintf(w, "%s\n", line)
+		} else {
+			fmt.Fprintf(w, "\n")
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+}
+
+// openaiExternalHandler translates OpenAI request→Anthropic, proxies, then reverses.
+func (h *Handler) openaiExternalHandler(w http.ResponseWriter, r *http.Request, body *translate.OpenAIRequest, resolved *router.ResolveResult) {
+	body.Model = resolved.Model
+
+	// Reverse translate: OpenAI → Anthropic
+	anthropicReq, err := translate.ReverseTranslateRequest(body)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "translate request: "+err.Error())
+		return
+	}
+
+	baseURL := strings.TrimRight(resolved.Provider.BaseURL, "/")
+	url := baseURL + "/messages"
+	apiKey := resolved.Provider.APIKey
+
+	reqBody, _ := json.Marshal(anthropicReq)
+	timeout := 60 * time.Second
+	if body.Stream {
+		timeout = 300 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "create request: "+err.Error())
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", apiKey)
+
+	client := h.clientFor(resolved.Provider)
+
+	if !body.Stream {
+		resp, err := client.Do(req)
+		if err != nil {
+			h.writeError(w, http.StatusBadGateway, "external api: "+err.Error())
+			return
+		}
+		defer resp.Body.Close()
+
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if resp.StatusCode >= 400 {
+			h.writeError(w, resp.StatusCode, string(respBody))
+			return
+		}
+
+		// Reverse translate response: Anthropic → OpenAI
+		var anthropicResp translate.AnthropicResponse
+		if err := json.Unmarshal(respBody, &anthropicResp); err != nil {
+			h.writeError(w, http.StatusInternalServerError, "parse response: "+err.Error())
+			return
+		}
+		openaiResp := translate.ReverseTranslateResponse(&anthropicResp, body.Model)
+		h.writeJSON(w, http.StatusOK, openaiResp)
+		return
+	}
+
+	// Streaming: reverse translate SSE
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := client.Do(req)
+	if err != nil {
+		h.writeError(w, http.StatusBadGateway, "external api: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		h.writeError(w, resp.StatusCode, string(respBody))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+
+	// Anthropic SSE → OpenAI SSE passthrough (already compatible)
+	flusher, _ := w.(http.Flusher)
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			fmt.Fprintf(w, "%s\n", line)
+		} else {
+			fmt.Fprintf(w, "\n")
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+}

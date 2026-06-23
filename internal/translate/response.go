@@ -119,3 +119,73 @@ func randHex(n int) string {
 	}
 	return string(b)
 }
+
+// ReverseTranslateResponse converts an Anthropic response to OpenAI format.
+func ReverseTranslateResponse(anthropic *AnthropicResponse, originalModel string) *OpenAIResponse {
+	message := OpenAIMessage{Role: "assistant"}
+
+	var textParts []string
+	var toolCalls []OpenAIToolCall
+
+	for i, block := range anthropic.Content {
+		switch block.Type {
+		case "text":
+			textParts = append(textParts, block.Text)
+		case "tool_use":
+			args, _ := json.Marshal(block.Input)
+			toolCalls = append(toolCalls, OpenAIToolCall{
+				Index: i,
+				ID:    block.ID,
+				Type:  "function",
+				Function: OpenAIToolFunction{
+					Name:      block.Name,
+					Arguments: string(args),
+				},
+			})
+		}
+	}
+
+	if len(textParts) == 1 {
+		message.Content = textParts[0]
+	} else if len(textParts) > 1 {
+		var parts []OpenAIContentPart
+		for _, t := range textParts {
+			parts = append(parts, OpenAIContentPart{Type: "text", Text: t})
+		}
+		message.Content = parts
+	}
+
+	if len(toolCalls) > 0 {
+		message.ToolCalls = toolCalls
+	}
+
+	stopReason := "stop"
+	if anthropic.StopReason != nil {
+		switch *anthropic.StopReason {
+		case "end_turn":
+			stopReason = "stop"
+		case "max_tokens":
+			stopReason = "length"
+		case "tool_use":
+			stopReason = "tool_calls"
+		}
+	}
+
+	return &OpenAIResponse{
+		ID:     anthropic.ID,
+		Object: "chat.completion",
+		Model:  originalModel,
+		Choices: []OpenAIChoice{
+			{
+				Index:        0,
+				Message:      message,
+				FinishReason: stopReason,
+			},
+		},
+		Usage: OpenAIUsage{
+			PromptTokens:     anthropic.Usage.InputTokens,
+			CompletionTokens: anthropic.Usage.OutputTokens,
+			TotalTokens:      anthropic.Usage.InputTokens + anthropic.Usage.OutputTokens,
+		},
+	}
+}

@@ -3,6 +3,7 @@ package translate
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // TranslateRequest converts an Anthropic request to OpenAI format.
@@ -294,6 +295,139 @@ func joinStrings(parts []string, sep string) string {
 	result := parts[0]
 	for _, p := range parts[1:] {
 		result += sep + p
+	}
+	return result
+}
+
+// ReverseTranslateRequest converts an OpenAI Chat Completions request to Anthropic Messages format.
+func ReverseTranslateRequest(req *OpenAIRequest) (*AnthropicRequest, error) {
+	messages := make([]AnthropicMessage, 0, len(req.Messages))
+
+	for _, msg := range req.Messages {
+		switch msg.Role {
+		case "system":
+			// System messages become system prompt (only last one wins for simplicity)
+			// We handle this below
+		case "user", "assistant", "tool":
+			m := reverseConvertMessage(&msg)
+			if m != nil {
+				messages = append(messages, *m)
+			}
+		}
+	}
+
+	// Build system prompt from system messages
+	var systemParts []string
+	for _, msg := range req.Messages {
+		if msg.Role == "system" {
+			if s, ok := msg.Content.(string); ok {
+				systemParts = append(systemParts, s)
+			}
+		}
+	}
+
+	anthropicReq := &AnthropicRequest{
+		Model:         req.Model,
+		Messages:      messages,
+		System:        joinStringParts(systemParts, "\n"),
+		MaxTokens:     req.MaxTokens,
+		Stream:        req.Stream,
+		Temperature:   req.Temperature,
+		TopP:          req.TopP,
+		StopSequences: req.Stop,
+	}
+
+	return anthropicReq, nil
+}
+
+func reverseConvertMessage(msg *OpenAIMessage) *AnthropicMessage {
+	var contentBlocks []AnthropicContentBlock
+
+	switch msg.Role {
+	case "user":
+		if c, ok := msg.Content.(string); ok {
+			return &AnthropicMessage{Role: "user", Content: c}
+		}
+		if parts, ok := msg.Content.([]interface{}); ok {
+			for _, p := range parts {
+				if m, ok := p.(map[string]interface{}); ok {
+					switch m["type"] {
+					case "text":
+						if t, ok := m["text"].(string); ok {
+							contentBlocks = append(contentBlocks, AnthropicContentBlock{Type: "text", Text: t})
+						}
+					case "image_url":
+						if url, ok := m["image_url"].(map[string]interface{}); ok {
+							if u, ok := url["url"].(string); ok {
+								contentBlocks = append(contentBlocks, AnthropicContentBlock{
+									Type: "image",
+									Source: &ImageSource{
+										Type:      "base64",
+										MediaType: "image/png",
+										Data:      extractBase64(u),
+									},
+								})
+							}
+						}
+					}
+				}
+			}
+			if len(contentBlocks) > 0 {
+				return &AnthropicMessage{Role: "user", Content: contentBlocks}
+			}
+		}
+	case "assistant":
+		if c, ok := msg.Content.(string); ok && c != "" {
+			contentBlocks = append(contentBlocks, AnthropicContentBlock{Type: "text", Text: c})
+		}
+		for _, tc := range msg.ToolCalls {
+			var input map[string]interface{}
+			json.Unmarshal([]byte(tc.Function.Arguments), &input)
+			if input == nil {
+				input = map[string]interface{}{}
+			}
+			contentBlocks = append(contentBlocks, AnthropicContentBlock{
+				Type:  "tool_use",
+				ID:    tc.ID,
+				Name:  tc.Function.Name,
+				Input: input,
+			})
+		}
+		if len(contentBlocks) > 0 {
+			return &AnthropicMessage{Role: "assistant", Content: contentBlocks}
+		}
+	case "tool":
+		content := ""
+		if c, ok := msg.Content.(string); ok {
+			content = c
+		}
+		return &AnthropicMessage{
+			Role: "user",
+			Content: []AnthropicContentBlock{{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   content,
+			}},
+		}
+	}
+	return nil
+}
+
+func extractBase64(dataURL string) string {
+	// data:image/png;base64,iVBOR... → iVBOR...
+	if idx := strings.LastIndex(dataURL, ","); idx >= 0 {
+		return dataURL[idx+1:]
+	}
+	return dataURL
+}
+
+func joinStringParts(parts []string, sep string) string {
+	var result string
+	for i, p := range parts {
+		if i > 0 {
+			result += sep
+		}
+		result += p
 	}
 	return result
 }

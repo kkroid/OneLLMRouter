@@ -231,8 +231,36 @@ func statusCmd() *cobra.Command {
 	}
 }
 
+func writeModelList(w http.ResponseWriter, resolver *router.Resolver) {
+	type modelEntry struct {
+		ID      string `json:"id"`
+		Object  string `json:"object"`
+		Created int64  `json:"created"`
+		OwnedBy string `json:"owned_by"`
+	}
+	var models []modelEntry
+	for _, id := range resolver.AllModelIDs() {
+		models = append(models, modelEntry{ID: id, Object: "model", Created: 1, OwnedBy: "router"})
+	}
+	if models == nil {
+		models = []modelEntry{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"object": "list", "data": models})
+}
+
 func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler *proxy.Handler, tokenMgr *auth.TokenManager, cfg *config.Config, logger *slog.Logger) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("OneCC Proxy — OK"))
+	})
+
+	mux.HandleFunc("/anthropic", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("OneCC Proxy — OK"))
+	})
+
+	mux.HandleFunc("/openai", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("OneCC Proxy — OK"))
 	})
@@ -250,26 +278,31 @@ func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler 
 	})
 
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
-		type modelEntry struct {
-			ID      string `json:"id"`
-			Object  string `json:"object"`
-			Created int64  `json:"created"`
-			OwnedBy string `json:"owned_by"`
-		}
-		var models []modelEntry
-		for _, id := range resolver.AllModelIDs() {
-			models = append(models, modelEntry{ID: id, Object: "model", Created: 1, OwnedBy: "router"})
-		}
-		if models == nil {
-			models = []modelEntry{}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"object": "list", "data": models})
+		writeModelList(w, resolver)
 	})
 
-	mux.Handle("/v1/messages", withPanicRecover(proxyHandler, logger))
-	mux.Handle("/messages", withPanicRecover(proxyHandler, logger))
-}
+	mux.HandleFunc("/anthropic/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		writeModelList(w, resolver)
+	})
+
+	mux.HandleFunc("/openai/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		writeModelList(w, resolver)
+	})
+
+	// Anthropic endpoints
+	anthropicH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHandler.ServeHTTP(w, r)
+	})
+	mux.Handle("/anthropic/v1/messages", withPanicRecover(anthropicH, logger))
+	mux.Handle("/v1/messages", withPanicRecover(anthropicH, logger))
+	mux.Handle("/messages", withPanicRecover(anthropicH, logger))
+
+	// OpenAI endpoints
+	openaiH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHandler.ServeOpenAI(w, r)
+	})
+	mux.Handle("/openai/v1/chat/completions", withPanicRecover(openaiH, logger))
+	}
 
 func printClaudeCodeSettings(cfg *config.Config) {
 	slots := cfg.ModelSlots
