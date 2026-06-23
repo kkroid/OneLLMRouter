@@ -1,25 +1,45 @@
-# OneCCRouter
+# OneLLMRouter
 
-**个人 AI 模型路由网关** — 将 GitHub Copilot Claude 模型 + 任意 Anthropic-compatible API 统一暴露为单一 Anthropic 接口，供 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 等工具使用。
+**个人 AI 模型路由网关** — 将 GitHub Copilot Claude 模型 + 任意 Anthropic-compatible API 统一暴露为标准 Anthropic 和 OpenAI 接口，供 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 等工具使用。
 
-**7.8 MB 单文件，零运行时依赖。**
+**~8 MB 单文件，零运行时依赖。**
 
 ## 架构
 
 ```
-Claude Code CLI / VS Code / 其他工具
-              │
-              ▼  Anthropic Messages API (localhost)
+Claude Code CLI     OpenAI 兼容工具
+(Anthropic API)     (OpenAI API)
+       │                  │
+       ▼                  ▼
+ /anthropic/v1/*    /openai/v1/*
+       │                  │
+       └──────┬───────────┘
+              ▼
     ┌─────────────────────────┐
-    │   onecc-router (Go)     │  ← 单二进制守护进程
+    │   onellm-router (Go)     │  ← 单二进制守护进程
     │   · HTTP proxy          │
     │   · 协议翻译             │
+    │   · Anthropic ↔ OpenAI  │
     └─────────────────────────┘
 ```
 
+## API 端点
+
+| 格式 | 端点 | Base URL |
+|------|------|----------|
+| **Anthropic** | `/anthropic/v1/messages` | `http://localhost:3456/anthropic` |
+| **Anthropic** 模型列表 | `/anthropic/v1/models` | |
+| **OpenAI** | `/openai/v1/chat/completions` | `http://localhost:3456/openai` |
+| **OpenAI** 模型列表 | `/openai/v1/models` | |
+| 兼容（旧） | `/v1/messages` | `http://localhost:3456` |
+| 健康检查 | `/health` | |
+
+> **Claude Code** 的 `ANTHROPIC_BASE_URL` 设为 `http://localhost:3456/anthropic`（会自动追加 `/v1/messages`）
+> **OpenAI 兼容工具** 的 base URL 设为 `http://localhost:3456/openai`（会自动追加 `/v1/chat/completions`）
+
 ## 可用模型
 
-由 `onecc-router.yaml` 中的 `providers` 配置定义：
+由 `onellm-router.yaml` 中的 `providers` 配置定义：
 
 | 前缀 | 模型 ID | 说明 |
 |------|--------|------|
@@ -35,17 +55,17 @@ Claude Code CLI / VS Code / 其他工具
 ### 1. 编译
 
 ```bash
-git clone https://github.com/kkroid/OneCCRouter.git && cd OneCCRouter
-pwsh build.ps1 -Version "1.0.0"
+git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter
+pwsh build.ps1
 ```
 
-产物在 `dist/onecc-router-v1.1.0.exe`。
+产物在 `dist/onellm-router-v1.2.0.exe`。
 
 ### 2. 配置
 
 ```bash
-cp onecc-router.example.yaml onecc-router.yaml
-# 编辑 onecc-router.yaml，填入你的 API Key
+cp onellm-router.example.yaml onellm-router.yaml
+# 编辑 onellm-router.yaml，填入你的 API Key
 ```
 
 ```yaml
@@ -55,7 +75,7 @@ server:
 
 log:
   level: "info"
-  dir: "~/.onecc/logs"
+  dir: "~/.onellm/logs"
   max_age_days: 30
 
 proxy:
@@ -89,10 +109,10 @@ model_slots:
 ### 3. 启动
 
 ```bash
-.\dist\onecc-router-v1.1.0.exe
+.\dist\onellm-router-v1.2.0.exe
 ```
 
-启动时会打印 Claude Code 的 `settings.json`，直接复制使用。如果配置了 Copilot 但未登录，会自动弹出 GitHub 设备授权流程。Token 保存在 `~/.onecc/github_token`。
+启动时会打印 Claude Code 的 `settings.json`，直接复制使用。如果配置了 Copilot 但未登录，会自动弹出 GitHub 设备授权流程。Token 保存在 `~/.onellm/github_token`。
 
 ### 4. 验证
 
@@ -100,28 +120,45 @@ model_slots:
 # 健康检查
 curl http://localhost:3456/health
 
-# 模型列表
-curl http://localhost:3456/v1/models
+# 模型列表（Anthropic 格式）
+curl http://localhost:3456/anthropic/v1/models
+
+# 模型列表（OpenAI 格式）
+curl http://localhost:3456/openai/v1/models
+
+# --- Anthropic 格式 ---
 
 # 非流式推理
-curl -X POST http://localhost:3456/v1/messages \
+curl -X POST http://localhost:3456/anthropic/v1/messages \
   -H "Content-Type: application/json" \
-  -d '{"model":"cp/claude-opus-4.8","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
 
 # 流式推理
-curl -N -X POST http://localhost:3456/v1/messages \
+curl -N -X POST http://localhost:3456/anthropic/v1/messages \
   -H "Content-Type: application/json" \
-  -d '{"model":"cp/claude-opus-4.8","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
+  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
+
+# --- OpenAI 格式 ---
+
+# 非流式推理
+curl -X POST http://localhost:3456/openai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
+
+# 流式推理
+curl -N -X POST http://localhost:3456/openai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
 ```
 
 ## Claude Code 配置
 
-启动时自动打印，或手动设置：
+启动时自动打印，或手动设置（注意 `ANTHROPIC_BASE_URL` 带 `/anthropic` 路径）：
 
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "http://localhost:3456",
+    "ANTHROPIC_BASE_URL": "http://localhost:3456/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "x",
     "ANTHROPIC_MODEL": "ds/deepseek-v4-pro[1m]",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "cp/claude-opus-4.8",
@@ -134,22 +171,35 @@ curl -N -X POST http://localhost:3456/v1/messages \
 }
 ```
 
+## OpenAI 兼容工具配置
+
+对于使用 OpenAI API 格式的工具（如 Continue、Aider、Cursor 等），将 base URL 指向 `/openai` 端点：
+
+```json
+{
+  "provider": "openai",
+  "apiKey": "x",
+  "baseUrl": "http://localhost:3456/openai",
+  "model": "ds/deepseek-v4-pro[1m]"
+}
+```
+
 ## CLI 命令
 
 ```bash
-onecc-router                # 启动守护进程（无 token 自动引导登录）
-onecc-router --daemon       # 后台运行
-onecc-router status         # 检查运行状态
-onecc-router install        # 注册开机自启
-onecc-router uninstall      # 取消开机自启
-onecc-router version        # 查看版本
+onellm-router                # 启动守护进程（无 token 自动引导登录）
+onellm-router --daemon       # 后台运行
+onellm-router status         # 检查运行状态
+onellm-router install        # 注册开机自启
+onellm-router uninstall      # 取消开机自启
+onellm-router version        # 查看版本
 ```
 
 ## 项目结构
 
 ```
-OneCCRouter/
-├── cmd/onecc-router/main.go           # CLI 入口
+OneLLMRouter/
+├── cmd/onellm-router/main.go           # CLI 入口
 ├── internal/
 │   ├── auth/                          # GitHub device OAuth + token 管理
 │   ├── config/                        # YAML 配置加载
@@ -157,14 +207,14 @@ OneCCRouter/
 │   ├── proxy/                         # HTTP 代理 (Copilot + External)
 │   ├── router/                        # Provider 解析 + 模型路由
 │   └── translate/                     # Anthropic ↔ OpenAI 协议翻译
-├── onecc-router.example.yaml          # 配置模板
+├── onellm-router.example.yaml          # 配置模板
 ├── build.ps1                          # 编译脚本
 └── go.mod
 ```
 
 ## 配置参考
 
-### onecc-router.yaml
+### onellm-router.yaml
 
 ```yaml
 server:
@@ -173,7 +223,7 @@ server:
 
 log:
   level: "info"
-  dir: "~/.onecc/logs"
+  dir: "~/.onellm/logs"
   max_age_days: 30
 
 proxy:
@@ -196,8 +246,9 @@ providers:
 
 每个 provider 可设置 `proxy`：`true` 走代理，`false` 直连，不填则继承全局设置。Copilot API 有 IP 区域限制必须走代理，国内服务如 DeepSeek 直连更快。
 
-### onecc-router.yaml
+### model_slots
 
+```yaml
 model_slots:
   default: "ds/deepseek-v4-pro[1m]"
   opus: "cp/claude-opus-4.8"
@@ -208,8 +259,8 @@ model_slots:
 
 ## 日志
 
-JSON 格式，按天滚动，保留 30 天，文件路径 `~/.onecc/logs/onecc-router-2026-06-12.log`：
+JSON 格式，按天滚动，保留 30 天，文件路径 `~/.onellm/logs/onellm-router-2026-06-12.log`：
 
 ```json
-{"time":"2026-06-12T10:30:00+08:00","level":"INFO","msg":"request","request_id":"a1b2c3d4","method":"POST","path":"/v1/messages","status":200,"duration_ms":1234,"model":"cp/claude-opus-4.8","provider":"cp","stream":true,"ttfb_ms":650}
+{"time":"2026-06-12T10:30:00+08:00","level":"INFO","msg":"request","request_id":"a1b2c3d4","method":"POST","path":"/anthropic/v1/messages","status":200,"duration_ms":1234,"model":"ds/deepseek-v4-pro[1m]","provider":"ds","stream":true,"ttfb_ms":650}
 ```

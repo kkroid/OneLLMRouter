@@ -151,7 +151,7 @@ func (tm *TokenManager) CheckTokenAvailable() bool {
 func (tm *TokenManager) readGitHubToken() (string, error) {
 	data, err := os.ReadFile(tm.tokenFile)
 	if err != nil {
-		return "", fmt.Errorf("no github token at %s — run 'onecc-router login' first", tm.tokenFile)
+		return "", fmt.Errorf("no github token at %s — run 'onellm-router login' first", tm.tokenFile)
 	}
 	token := strings.TrimSpace(string(data))
 	if token == "" {

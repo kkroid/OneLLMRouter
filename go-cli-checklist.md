@@ -3,13 +3,13 @@
 日期：2026-06-11（P0-P7 MVP） / 2026-06-12（P11 长期运行）
 状态：**✅ CLI 全部完成（P0-P11）**
 
-> **架构决策**：Go 做后台核心（HTTP proxy + gRPC server），QT 做桌面面板。CLI 子命令：`serve`（默认）+ `login` + `status`。二进制名 `onecc-router.exe`。单一配置文件原则。
+> **架构决策**：Go 做后台核心（HTTP proxy + gRPC server），QT 做桌面面板。CLI 子命令：`serve`（默认）+ `login` + `status`。二进制名 `onellm-router.exe`。单一配置文件原则。
 
 ---
 
 ## 1. 定位
 
-> 用 Go 重新实现 OneCCRouter 的后台核心：Anthropic API 兼容的模型路由网关，替代当前 TypeScript Docker 版本。
+> 用 Go 重新实现 OneLLMRouter 的后台核心：Anthropic API 兼容的模型路由网关，替代当前 TypeScript Docker 版本。
 
 **包含 / 不包含**：
 
@@ -23,7 +23,7 @@
 | # | 标准 | 度量 | 状态 |
 |---|------|------|------|
 | C1 | Go 编译通过 | `go build` 零 error | ⏸ |
-| C2 | 服务启动正常 | `./onecc-router.exe serve` 启动，监听 3456 + gRPC 9090 | ⏸ |
+| C2 | 服务启动正常 | `./onellm-router.exe serve` 启动，监听 3456 + gRPC 9090 | ⏸ |
 | C3 | 健康检查 | `curl localhost:3456/health` → `{"status":"ok"}` | ⏸ |
 | C4 | 模型列表 | `curl localhost:3456/v1/models` → JSON 数组包含所有 .env 配置的模型 | ⏸ |
 | C5 | 非流式代理 | Anthropic API 请求 → Copilot → 返回正确 Anthropic 响应 | ⏸ |
@@ -44,17 +44,17 @@
 **目标**：Go module 初始化、目录结构、配置文件定义、编译脚本
 
 - [x] **P0.1** [Go] 创建 Go module + 目录结构
-  - `go mod init github.com/kkroid/onecc-router`
-  - 目录：`cmd/onecc-router/`, `internal/proxy/`, `internal/router/`, `internal/auth/`, `internal/translate/`, `internal/config/`, `internal/log/`
+  - `go mod init github.com/kkroid/onellm-router`
+  - 目录：`cmd/onellm-router/`, `internal/proxy/`, `internal/router/`, `internal/auth/`, `internal/translate/`, `internal/config/`, `internal/log/`
   - 依赖：`cobra`, `viper`, `slog`, `lumberjack`, `google.golang.org/grpc`, `google/uuid`
 - [x] **P0.2** [Go] 定义配置文件格式（单文件原则）
-  - `onecc-router.yaml` — 正式配置（gitignore）
-  - `onecc-router.example.yaml` — 模板（提交）
+  - `onellm-router.yaml` — 正式配置（gitignore）
+  - `onellm-router.example.yaml` — 模板（提交）
   - 内容：监听端口（HTTP 3456 + gRPC 1083）、日志路径/级别/滚动策略、代理设置、providers 列表
 - [x] **P0.3** [Go] CLI 框架搭建（cobra）
-  - `onecc-router serve` — 启动守护进程
-  - `onecc-router login` — 手动 device login
-  - `onecc-router status` — 健康检查 + 模型列表
+  - `onellm-router serve` — 启动守护进程
+  - `onellm-router login` — 手动 device login
+  - `onellm-router status` — 健康检查 + 模型列表
   - `--config` flag 指定配置文件路径
   - `--version` 输出版本信息
 - [x] **P0.4** [Go] 日志模块
@@ -67,7 +67,7 @@
   - `make run` — 编译 + 启动
   - `make test` — 运行测试
 
-**验收**：`go build ./cmd/onecc-router/` 成功，`./onecc-router.exe --version` 输出版本，`./onecc-router.exe serve` 启动输出日志
+**验收**：`go build ./cmd/onellm-router/` 成功，`./onellm-router.exe --version` 输出版本，`./onellm-router.exe serve` 启动输出日志
 
 ---
 
@@ -85,7 +85,7 @@
   - `GetAllModelIDs()` 返回完整列表
 - [x] **P1.3** [Go] HTTP server 骨架（已在 P0 完成）
   - 参考当前 TypeScript 的路由结构
-  - `GET /` → `"OneCC Proxy — OK"`
+  - `GET /` → `"OneLLM Proxy — OK"`
   - `GET /health` → `{"status":"ok"}`
   - `GET /v1/models` → `{"object":"list","data":[...]}`
   - 可选：`net/http` 标准库 或 `chi` router
@@ -102,7 +102,7 @@
 **目标**：GitHub device OAuth → Copilot token 获取/缓存/刷新
 
 - [x] **P2.1** [Go] Token 读取与验证
-  - 从 `~/.onecc/github_token` 读取 GitHub token
+  - 从 `~/.onellm/github_token` 读取 GitHub token
   - 用 GitHub token 换 Copilot API token（`https://api.github.com/copilot_internal/v2/token`）
   - 解析返回的 `{token, endpoints.api}`
   - 缓存 Copilot token，使用时 3 秒超时探活
@@ -110,17 +110,17 @@
   - 调用 `https://github.com/login/device/code` 获取 `{device_code, user_code, verification_uri, interval}`
   - 控制台输出授权链接 + 验证码
   - 轮询 `https://github.com/login/oauth/access_token` 等待用户确认
-  - 成功后写入 `~/.onecc/github_token`
+  - 成功后写入 `~/.onellm/github_token`
   - 错误处理：`authorization_pending`（继续）、`slow_down`（增加间隔）、其他错误（退出）
 - [x] **P2.3** [Go] `login` 子命令
   - 手动触发 device login
-  - `onecc-router login` 执行完整 device OAuth 流程
+  - `onellm-router login` 执行完整 device OAuth 流程
 - [x] **P2.4** [Go] 代理支持（SOCKS5 dialer via golang.org/x/net/proxy）
   - 尊重 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量
   - Copilot API 通过 SOCKS5 `127.0.0.1:1082` 访问
   - `http.Client` 配置代理 transport
 
-**验收**：`onecc-router login` 完成 device 授权，token 文件写入成功，内存缓存生效
+**验收**：`onellm-router login` 完成 device 授权，token 文件写入成功，内存缓存生效
 
 ---
 
@@ -213,11 +213,11 @@ curl -N -X POST http://localhost:3456/v1/messages \
   - 实现 proto 中定义的所有 RPC
   - `GetStatus` 返回：版本、运行时间、活跃连接数、token 状态
 - [x] **P5.3** [Go] `status` 子命令（P0 已完成 HTTP 版）
-  - 打印 daemon 状态（通过读 `onecc-router.pid` 或 HTTP 健康检查）
+  - 打印 daemon 状态（通过读 `onellm-router.pid` 或 HTTP 健康检查）
   - 如果 daemon 在运行 → 显示端口、模型数、provider 数、uptime
-  - 如果 daemon 不在运行 → 提示 `onecc-router serve` 启动
+  - 如果 daemon 不在运行 → 提示 `onellm-router serve` 启动
 
-**验收**：`grpcurl -plaintext 127.0.0.1:9090 list` 列出服务，`onecc-router status` 显示状态
+**验收**：`grpcurl -plaintext 127.0.0.1:9090 list` 列出服务，`onellm-router status` 显示状态
 
 ---
 
@@ -255,7 +255,7 @@ curl -N -X POST http://localhost:3456/v1/messages \
 **目标**：守护进程级别的可靠性，不能崩、不能悄无声息挂掉
 
 - [x] **P8.1** [Go] PID 文件 + 重复启动检测
-  - 启动时写入 `~/.onecc/onecc-router.pid`
+  - 启动时写入 `~/.onellm/onellm-router.pid`
   - 再次启动检测到已有 PID → 打印 "已在运行 (PID xxx)" 并退出
   - 停止时删除 PID 文件
 - [x] **P8.2** [Go] 每请求 panic recover
@@ -280,7 +280,7 @@ curl -N -X POST http://localhost:3456/v1/messages \
   - serve 检测无 token → 强制 login（阻塞，必须完成才能启动）
   - `login` 子命令保留，可手动触发
 - [x] **P9.0b** [Go] CLI UX — `--daemon` 后台运行
-  - `onecc-router --daemon` → 不阻塞终端
+  - `onellm-router --daemon` → 不阻塞终端
   - 日志仍写文件，stdout/stderr 关闭
 
 ### Phase 9：可观测性 + 测试
@@ -316,7 +316,7 @@ curl -N -X POST http://localhost:3456/v1/messages \
 
 **目标**：本地长期使用所需的稳定性、便利性改进
 
-- [x] **P11.1** [Go] 开机自启 — `onecc-router install` / `uninstall`
+- [x] **P11.1** [Go] 开机自启 — `onellm-router install` / `uninstall`
   - `install` → 写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 注册表键
   - 注册表值指向后台启动命令（带 `--daemon`）
   - `uninstall` → 移除注册表项 + 清理 pid 文件
@@ -337,7 +337,7 @@ curl -N -X POST http://localhost:3456/v1/messages \
   - SSE 客户端断开 → 通过 `r.Context().Done()` 取消 upstream 请求
   - scanner 循环正确退出
 
-**验收**：`onecc-router install` 注册开机启动；yaml 写错启动直接报错；Ctrl+C 断开 SSE 后 goroutine 退出
+**验收**：`onellm-router install` 注册开机启动；yaml 写错启动直接报错；Ctrl+C 断开 SSE 后 goroutine 退出
 
 ---
 
@@ -345,8 +345,8 @@ curl -N -X POST http://localhost:3456/v1/messages \
 
 | # | 决策 | 结论 | 状态 |
 |---|------|------|------|
-| D1 | Go module 名 | `github.com/kkroid/onecc-router` | ✅ |
-| D2 | 配置文件格式 | 单一 YAML 配置文件：`onecc-router.yaml`（gitignore）+ `onecc-router.example.yaml`（提交） | ✅ |
+| D1 | Go module 名 | `github.com/kkroid/onellm-router` | ✅ |
+| D2 | 配置文件格式 | 单一 YAML 配置文件：`onellm-router.yaml`（gitignore）+ `onellm-router.example.yaml`（提交） | ✅ |
 | D3 | HTTP router 库 | `net/http` 标准库（零外部依赖，6 个路由不需要框架） | ✅ |
 | D4 | gRPC port | 配置文件中设置，默认 `1083` | ✅ |
 | D5 | 请求 ID 格式 | UUID v4（`github.com/google/uuid`） | ✅ |

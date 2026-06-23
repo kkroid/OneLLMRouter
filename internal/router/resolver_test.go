@@ -3,7 +3,7 @@ package router
 import (
 	"testing"
 
-	"github.com/kkroid/onecc-router/internal/config"
+	"github.com/kkroid/onellm-router/internal/config"
 )
 
 func TestResolverExactMatch(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents the onecc-router configuration.
+// Config represents the onellm-router configuration.
 type Config struct {
 	Server    ServerConfig     `yaml:"server"`
 	Log       LogConfig        `yaml:"log"`
@@ -64,7 +64,7 @@ func DefaultConfig() *Config {
 		},
 		Log: LogConfig{
 			Level:      "info",
-			Dir:        "~/.onecc/logs",
+			Dir:        "~/.onellm/logs",
 			MaxAgeDays: 30,
 		},
 		Proxy: ProxyConfig{
@@ -80,7 +80,7 @@ func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("配置文件不存在: %s\n  复制模板: cp onecc-router.example.yaml onecc-router.yaml", path)
+			return nil, fmt.Errorf("配置文件不存在: %s\n  复制模板: cp onellm-router.example.yaml onellm-router.yaml", path)
 		}
 		return nil, fmt.Errorf("read config: %w", err)
 	}

@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kkroid/onecc-router/internal/auth"
-	"github.com/kkroid/onecc-router/internal/router"
+	"github.com/kkroid/onellm-router/internal/auth"
+	"github.com/kkroid/onellm-router/internal/router"
 )
 
 // ==================== Test helpers ====================

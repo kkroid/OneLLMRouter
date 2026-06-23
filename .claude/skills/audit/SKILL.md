@@ -56,8 +56,8 @@ Phase 完成
 
 ### 2.1 Go 后台
 ```bash
-go build -o build/oneccd.exe ./cmd/oneccd/
-./build/oneccd.exe &
+go build -o build/onellmd.exe ./cmd/onellmd/
+./build/onellmd.exe &
 sleep 2
 
 # 健康检查
@@ -78,7 +78,7 @@ grpcurl -plaintext 127.0.0.1:9090 list
 cmake --build build/panel --config Release
 
 # 启动面板
-./build/panel/Release/onecc-panel.exe
+./build/panel/Release/onellm-panel.exe
 # 验证：托盘图标显示正常、主窗口可打开、模型列表显示正确
 ```
 
@@ -99,7 +99,7 @@ cmake --build build/panel --config Release
 
 ### 3.2 提交信息
 - 格式是否符合 Conventional Commits？
-- Scope 是否正确（oneccd / panel / proto / build / config / docs）？
+- Scope 是否正确（onellmd / panel / proto / build / config / docs）？
 - 是否包含 Co-Authored-By 签名？
 
 ---

@@ -1,7 +1,7 @@
 package router
 
 import (
-	"github.com/kkroid/onecc-router/internal/config"
+	"github.com/kkroid/onellm-router/internal/config"
 )
 
 // Provider represents a configured model provider.

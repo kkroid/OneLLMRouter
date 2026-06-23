@@ -1,4 +1,4 @@
-# OneCCRouter Build Script
+# OneLLMRouter Build Script
 param(
     [switch]$Clean,
     [switch]$TestOnly,
@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $OutDir = "dist"
-$Binary = "$OutDir\onecc-router-v$Version.exe"
+$Binary = "$OutDir\onellm-router-v$Version.exe"
 
 if ($TestOnly) {
     Write-Host "=== 测试 ===" -ForegroundColor Cyan
@@ -26,7 +26,7 @@ if ($Clean) {
 Write-Host "=== 编译 v$Version ===" -ForegroundColor Cyan
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $ldflags = "-s -w -X main.version=$Version"
-go build -ldflags="$ldflags" -o $Binary ./cmd/onecc-router/
+go build -ldflags="$ldflags" -o $Binary ./cmd/onellm-router/
 if ($LASTEXITCODE -ne 0) { throw "编译失败" }
 
 $size = (Get-Item $Binary).Length
@@ -44,7 +44,7 @@ if ($Install) {
 
 Write-Host ""
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
-Write-Host "  onecc-router v$Version" -ForegroundColor Green
+Write-Host "  onellm-router v$Version" -ForegroundColor Green
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
 Write-Host ""
 Write-Host "  .\$Binary              # 启动"

@@ -43,11 +43,11 @@ Co-Authored-By: Happy <yesreply@happy.engineering>
 - `chore`: 其他杂项
 
 **Scope 范围（本项目）：**
-- `oneccd`: Go 后台守护进程（代理核心、路由、协议翻译）
+- `onellmd`: Go 后台守护进程（代理核心、路由、协议翻译）
 - `panel`: QT/C++ 桌面管理面板
 - `proto`: gRPC/protobuf 接口定义
 - `build`: 构建系统（Makefile, CMake）
-- `config`: 配置文件（oneccd.yaml, .env）
+- `config`: 配置文件（onellmd.yaml, .env）
 - `docs`: 文档
 - `ts-proxy`: TypeScript MVP（过渡期，后续废弃）
 

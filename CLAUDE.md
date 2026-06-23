@@ -1,8 +1,8 @@
-# OneCCRouter Claude Code 开发指南
+# OneLLMRouter Claude Code 开发指南
 
 ## 项目定位
 
-**个人 AI 模型路由网关** — 将 GitHub Copilot Claude 模型 + 任意 Anthropic-compatible API 统一暴露为单一 Anthropic 接口，供 Claude Code 等工具使用。
+**个人 AI 模型路由网关** — 将 GitHub Copilot Claude 模型 + 任意 Anthropic-compatible API 统一暴露为标准 Anthropic + OpenAI 双接口，供 Claude Code 等工具使用。
 
 - 每人独立部署一套，单机运行
 - 不追求高并发（几个工具同时调用）
@@ -12,14 +12,20 @@
 ## 架构
 
 ```
-Claude Code CLI / VS Code / 其他工具
-              │
-              ▼  Anthropic Messages API (localhost)
-    ┌─────────────────────────┐
-    │   onecc-router (Go)     │  ← 单二进制守护进程
-    │   · HTTP proxy          │
-    │   · 协议翻译             │
-    └─────────────────────────┘
+Claude Code CLI              OpenAI 兼容工具
+(Anthropic API)              (OpenAI API)
+       │                           │
+       ▼                           ▼
+ /anthropic/v1/messages    /openai/v1/chat/completions
+       │                           │
+       └───────────┬───────────────┘
+                   ▼
+    ┌─────────────────────────────┐
+    │     onellm-router (Go)       │  ← 单二进制守护进程
+    │     · HTTP proxy            │
+    │     · Anthropic ↔ OpenAI    │
+    │     · 协议翻译 + SSE 流式    │
+    └─────────────────────────────┘
 ```
 
 ## 开发环境
@@ -47,8 +53,8 @@ Claude Code CLI / VS Code / 其他工具
 ## 项目结构
 
 ```
-OneCCRouter/
-├── cmd/onecc-router/main.go           # CLI 入口
+OneLLMRouter/
+├── cmd/onellm-router/main.go           # CLI 入口
 ├── internal/
 │   ├── auth/                          # GitHub device OAuth + token 管理
 │   ├── config/                        # YAML 配置加载
@@ -56,7 +62,7 @@ OneCCRouter/
 │   ├── proxy/                         # HTTP 代理 (Copilot + External)
 │   ├── router/                        # Provider 解析 + 模型路由
 │   └── translate/                     # Anthropic ↔ OpenAI 协议翻译
-├── onecc-router.example.yaml          # 配置模板
+├── onellm-router.example.yaml          # 配置模板
 ├── build.ps1                          # 编译脚本
 └── go.mod
 ```
@@ -111,14 +117,14 @@ OneCCRouter/
 | 约定 | 说明 |
 |------|------|
 | 版本 | Go 1.22+ |
-| 模块 | `github.com/kkroid/onecc-router` |
+| 模块 | `github.com/kkroid/onellm-router` |
 | CLI 框架 | `cobra` + `viper` |
 | 日志 | `log/slog` + 自实现 daily writer（按天切分，保留 30 天，启动时清理过期日志） |
 | 请求 ID | 每个请求生成 UUID v4，通过 `context.Context` 传递 |
 | 错误处理 | `fmt.Errorf("...: %w", err)` 包装错误链，绝不吞错误 |
 | 代理 | Copilot API 走 SOCKS5 代理（yaml 中 `proxy.socks5` 配置） |
 | HTTP | `net/http` 标准库 |
-| SSE 流式输出 | 严格 Anthropic 规范：`event: <type>\ndata: <json>\n\n` |
+| SSE 流式输出 | Anthropic: `event: <type>\ndata: <json>\n\n`；OpenAI: `data: <json>\n\n` SSE 直通 |
 | 测试 | `go test`，表驱动测试 |
 
 #### 日志格式
@@ -134,7 +140,7 @@ OneCCRouter/
 pwsh build.ps1 -Version "1.0.0"
 
 # 手动编译
-go build -ldflags="-s -w -X main.version=1.1.0" -o dist/onecc-router-v1.1.0.exe ./cmd/onecc-router/
+go build -ldflags="-s -w -X main.version=1.2.0" -o dist/onellm-router-v1.2.0.exe ./cmd/onellm-router/
 
 # 测试
 go test ./...
@@ -142,8 +148,8 @@ go test ./...
 
 ### 配置文件
 
-- `onecc-router.yaml`：完整配置（端口、日志、代理、provider、model slots）— gitignore
-- `onecc-router.example.yaml`：配置模板（提交到 git）
+- `onellm-router.yaml`：完整配置（端口、日志、代理、provider、model slots）— gitignore
+- `onellm-router.example.yaml`：配置模板（提交到 git）
 
 ---
 
@@ -169,21 +175,31 @@ go test ./...
 
 ```bash
 # 1. 启动
-./dist/onecc-router-v1.1.0.exe
+./dist/onellm-router-v1.2.0.exe
 
 # 2. 健康检查
 curl http://localhost:3456/health
 
 # 3. 模型列表
-curl http://localhost:3456/v1/models
+curl http://localhost:3456/anthropic/v1/models
 
-# 4. 非流式代理请求
-curl -X POST http://localhost:3456/v1/messages \
+# 4. Anthropic 非流式
+curl -X POST http://localhost:3456/anthropic/v1/messages \
   -H "Content-Type: application/json" \
-  -d '{"model":"cp/claude-opus-4.8","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
 
-# 5. 流式请求
-curl -N -X POST http://localhost:3456/v1/messages \
+# 5. Anthropic 流式
+curl -N -X POST http://localhost:3456/anthropic/v1/messages \
   -H "Content-Type: application/json" \
-  -d '{"model":"cp/claude-opus-4.8","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
+  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
+
+# 6. OpenAI 非流式
+curl -X POST http://localhost:3456/openai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
+
+# 7. OpenAI 流式
+curl -N -X POST http://localhost:3456/openai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
 ```

@@ -21,7 +21,7 @@ argument-hint: <任务描述>
 
 #### 步骤 1：<步骤名称>
 - **做什么**：<具体操作>
-- **涉及文件**：<预估涉及的文件（Go proto / cmd/oneccd / panel/ 等）>
+- **涉及文件**：<预估涉及的文件（Go proto / cmd/onellmd / panel/ 等）>
 - **验证**：<如何证明步骤完成（编译通过？gRPC 调用返回正确？curl 测试通过？面板显示正常？）>
 - **风险**：<可能的阻塞点>
 
@@ -31,7 +31,7 @@ argument-hint: <任务描述>
 ### 注意事项
 - 改动在哪一侧？（Go 后台 / QT 面板 / proto 接口 / 两边都改）
 - proto 接口变更是否向后兼容？
-- 是否需要更新 oneccd.yaml 配置格式或 .env.example？
+- 是否需要更新 onellmd.yaml 配置格式或 .env.example？
 - 是否需要更新 CLAUDE.md 技术约定？
 ```
 

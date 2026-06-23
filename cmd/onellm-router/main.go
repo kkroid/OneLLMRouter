@@ -17,14 +17,14 @@ import (
 
 	"golang.org/x/sys/windows/registry"
 
-	"github.com/kkroid/onecc-router/internal/auth"
-	"github.com/kkroid/onecc-router/internal/config"
-	oneccLog "github.com/kkroid/onecc-router/internal/log"
+	"github.com/kkroid/onellm-router/internal/auth"
+	"github.com/kkroid/onellm-router/internal/config"
+	onellmLog "github.com/kkroid/onellm-router/internal/log"
 	netproxy "golang.org/x/net/proxy"
 
-	"github.com/kkroid/onecc-router/internal/proxy"
-	"github.com/kkroid/onecc-router/internal/router"
-	"github.com/kkroid/onecc-router/internal/ui"
+	"github.com/kkroid/onellm-router/internal/proxy"
+	"github.com/kkroid/onellm-router/internal/router"
+	"github.com/kkroid/onellm-router/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -47,22 +47,22 @@ func configPath() string {
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return "onecc-router.yaml"
+		return "onellm-router.yaml"
 	}
-	return filepath.Join(filepath.Dir(exe), "onecc-router.yaml")
+	return filepath.Join(filepath.Dir(exe), "onellm-router.yaml")
 }
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "onecc-router",
-		Short: "OneCCRouter — AI model proxy gateway",
-		Long: `OneCCRouter unifies GitHub Copilot Claude models and arbitrary
-Anthropic-compatible APIs behind a single Anthropic Messages API endpoint.`,
+		Use:   "onellm-router",
+		Short: "OneLLMRouter — AI model proxy gateway",
+		Long: `OneLLMRouter unifies GitHub Copilot Claude models and arbitrary
+Anthropic-compatible APIs behind standard Anthropic + OpenAI API endpoints.`,
 		Version: version,
 		RunE:    serveCmd().RunE,
 	}
 
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file path (default: onecc-router.yaml next to exe)")
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file path (default: onellm-router.yaml next to exe)")
 	rootCmd.PersistentFlags().BoolVarP(&daemon, "daemon", "d", false, "run in background")
 	rootCmd.PersistentFlags().BoolVar(&noPidLock, "no-pid", false, "allow multiple instances (skip PID lock)")
 
@@ -102,8 +102,8 @@ func serveCmd() *cobra.Command {
 				}
 			}
 
-						logCfg := oneccLog.FromConfig(cfg.Log.Level, cfg.Log.Dir, cfg.Log.MaxAgeDays)
-			logger, cleanup, err := oneccLog.Setup(logCfg)
+						logCfg := onellmLog.FromConfig(cfg.Log.Level, cfg.Log.Dir, cfg.Log.MaxAgeDays)
+			logger, cleanup, err := onellmLog.Setup(logCfg)
 			if err != nil {
 				return fmt.Errorf("setup logger: %w", err)
 			}
@@ -140,7 +140,7 @@ func serveCmd() *cobra.Command {
 			proxyHandler := proxy.NewHandler(resolver, tokenMgr, httpClient, directClient, logger)
 			proxyHandler.ErrorHook = ui.ErrorNotify
 
-			logger.Info("onecc-router starting",
+			logger.Info("onellm-router starting",
 				"version", version,
 				"http_port", cfg.Server.HTTPPort,
 				"providers", len(providers),
@@ -191,7 +191,7 @@ func serveCmd() *cobra.Command {
 				logger.Error("HTTP shutdown error", "error", err)
 			}
 
-			logger.Info("onecc-router stopped")
+			logger.Info("onellm-router stopped")
 			return nil
 		},
 	}
@@ -211,7 +211,7 @@ func statusCmd() *cobra.Command {
 			resp, err := reqClient.Get(url)
 			if err != nil {
 				fmt.Println("未运行")
-				fmt.Println("启动: onecc-router")
+				fmt.Println("启动: onellm-router")
 				return nil
 			}
 			defer resp.Body.Close()
@@ -252,17 +252,7 @@ func writeModelList(w http.ResponseWriter, resolver *router.Resolver) {
 func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler *proxy.Handler, tokenMgr *auth.TokenManager, cfg *config.Config, logger *slog.Logger) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("OneCC Proxy — OK"))
-	})
-
-	mux.HandleFunc("/anthropic", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("OneCC Proxy — OK"))
-	})
-
-	mux.HandleFunc("/openai", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("OneCC Proxy — OK"))
+		w.Write([]byte("OneLLM Proxy — OK"))
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +298,7 @@ func printClaudeCodeSettings(cfg *config.Config) {
 	slots := cfg.ModelSlots
 	settings := map[string]interface{}{
 		"env": map[string]string{
-			"ANTHROPIC_BASE_URL":             fmt.Sprintf("http://localhost:%d", cfg.Server.HTTPPort),
+			"ANTHROPIC_BASE_URL":             fmt.Sprintf("http://localhost:%d/anthropic", cfg.Server.HTTPPort),
 			"ANTHROPIC_AUTH_TOKEN":           "x",
 			"ANTHROPIC_MODEL":                slots.Default,
 			"ANTHROPIC_DEFAULT_OPUS_MODEL":   slots.Opus,
@@ -344,16 +334,16 @@ func (sw *statusWriter) Flush() {
 func withRequestID(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		ctx := oneccLog.WithRequestID(r.Context())
-		meta := &oneccLog.RequestMeta{}
+		ctx := onellmLog.WithRequestID(r.Context())
+		meta := &onellmLog.RequestMeta{}
 		meta.MarkStart()
-		ctx = oneccLog.WithRequestMeta(ctx, meta)
-		requestID := oneccLog.RequestIDFromContext(ctx)
+		ctx = onellmLog.WithRequestMeta(ctx, meta)
+		requestID := onellmLog.RequestIDFromContext(ctx)
 
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(sw, r.WithContext(ctx))
 
-		meta = oneccLog.RequestMetaFromContext(ctx)
+		meta = onellmLog.RequestMetaFromContext(ctx)
 		attrs := []any{
 			"request_id", requestID,
 			"method", r.Method,
@@ -379,7 +369,7 @@ func withPanicRecover(next http.Handler, logger *slog.Logger) http.Handler {
 		defer func() {
 			if err := recover(); err != nil {
 				logger.Error("panic in handler",
-					"request_id", oneccLog.RequestIDFromContext(r.Context()),
+					"request_id", onellmLog.RequestIDFromContext(r.Context()),
 					"error", fmt.Sprintf("%v", err),
 				)
 				http.Error(w, `{"error":{"type":"internal","message":"internal server error"}}`, http.StatusInternalServerError)
@@ -430,11 +420,11 @@ func installCmd() *cobra.Command {
 			cmdLine := fmt.Sprintf(`"%s" --daemon`, exePath)
 
 			// Check if already registered
-			existing, _, _ := k.GetStringValue("OneCCRouter")
+			existing, _, _ := k.GetStringValue("OneLLMRouter")
 			if existing == cmdLine {
 				fmt.Println("✅ 已注册开机启动 (无需重复注册)")
 			} else {
-				if err := k.SetStringValue("OneCCRouter", cmdLine); err != nil {
+				if err := k.SetStringValue("OneLLMRouter", cmdLine); err != nil {
 					return fmt.Errorf("set registry: %w", err)
 				}
 				fmt.Println("✅ 已注册开机启动")
@@ -466,7 +456,7 @@ func uninstallCmd() *cobra.Command {
 				return fmt.Errorf("open registry: %w", err)
 			}
 			defer k.Close()
-			if err := k.DeleteValue("OneCCRouter"); err != nil {
+			if err := k.DeleteValue("OneLLMRouter"); err != nil {
 				return fmt.Errorf("not registered (no registry key found)")
 			}
 			fmt.Println("✅ 已取消开机启动")

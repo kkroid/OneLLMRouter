@@ -1,11 +1,11 @@
 # 正式配置文件 (含 API Key)
-onecc-router.yaml
+onellm-router.yaml
 
 # 编译产物
 dist/
 
 # 运行时数据
-~/.onecc/
+~/.onellm/
 
 # 依赖
 node_modules/
@@ -26,4 +26,4 @@ Thumbs.db
 .idea/
 dist/
 v1.1.0-plan.md
-onecc-router.exe
+onellm-router.exe

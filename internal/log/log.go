@@ -87,7 +87,7 @@ func (dw *dailyWriter) rotate() error {
 		dw.file.Close()
 	}
 	dw.today = time.Now().Format("2006-01-02")
-	name := filepath.Join(dw.dir, "onecc-router-"+dw.today+".log")
+	name := filepath.Join(dw.dir, "onellm-router-"+dw.today+".log")
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("open log %s: %w", name, err)
@@ -203,10 +203,10 @@ func cleanOldLogs(dir string, maxDays int) {
 			continue
 		}
 		name := entry.Name()
-		if len(name) < len("onecc-router-2006-01-02.log") {
+		if len(name) < len("onellm-router-2006-01-02.log") {
 			continue
 		}
-		dateStr := name[len("onecc-router-") : len("onecc-router-")+10]
+		dateStr := name[len("onellm-router-") : len("onellm-router-")+10]
 		if t, err := time.Parse("2006-01-02", dateStr); err == nil && t.Before(cutoff) {
 			os.Remove(filepath.Join(dir, name))
 		}

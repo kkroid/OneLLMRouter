@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kkroid/onecc-router/internal/auth"
-	oneccLog "github.com/kkroid/onecc-router/internal/log"
-	"github.com/kkroid/onecc-router/internal/router"
-	"github.com/kkroid/onecc-router/internal/translate"
+	"github.com/kkroid/onellm-router/internal/auth"
+	onellmLog "github.com/kkroid/onellm-router/internal/log"
+	"github.com/kkroid/onellm-router/internal/router"
+	"github.com/kkroid/onellm-router/internal/translate"
 )
 
 // Copilot HTTP headers required by the API.
@@ -91,7 +91,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Attach request metadata to context for logging
-	meta := oneccLog.RequestMetaFromContext(r.Context())
+	meta := onellmLog.RequestMetaFromContext(r.Context())
 	meta.Model = fullModel
 	meta.Provider = resolved.Provider.Prefix
 	meta.Stream = body.Stream
@@ -334,7 +334,7 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, message string) 
 	}
 	// Popup for critical upstream errors
 	if h.ErrorHook != nil && (status >= 500 || status == 429) {
-		title := "OneCCRouter"
+		title := "OneLLMRouter"
 		if strings.Contains(message, "copilot") || strings.Contains(message, "token") {
 			title = "Copilot Error"
 		}
@@ -352,7 +352,7 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, message string) 
 // ttfbWriter captures time-to-first-byte for logging.
 type ttfbWriter struct {
 	http.ResponseWriter
-	meta     *oneccLog.RequestMeta
+	meta     *onellmLog.RequestMeta
 	firstWrite bool
 }
 
@@ -409,7 +409,7 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	meta := oneccLog.RequestMetaFromContext(r.Context())
+	meta := onellmLog.RequestMetaFromContext(r.Context())
 	meta.Model = fullModel
 	meta.Provider = resolved.Provider.Prefix
 	meta.Stream = body.Stream

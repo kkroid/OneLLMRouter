@@ -37,7 +37,7 @@ func (t *Tray) Run() {
 
 	hInst, _, _ := k32.NewProc("GetModuleHandleW").Call(0)
 
-	className, _ := windows.UTF16PtrFromString("OneCCRouterTray")
+	className, _ := windows.UTF16PtrFromString("OneLLMRouterTray")
 	var wc wndClassEx
 	wc.cbSize = uint32(unsafe.Sizeof(wc))
 	wc.lpfnWndProc = windows.NewCallback(t.wndProc)
@@ -60,7 +60,7 @@ func (t *Tray) Run() {
 	nid.uFlags = 0x00000001 | 0x00000002 | 0x00000004
 	nid.uCallbackMessage = wmTrayMsg
 	nid.hIcon = hicon
-	copyUTF16(nid.szTip[:], "OneCCRouter")
+	copyUTF16(nid.szTip[:], "OneLLMRouter")
 
 	shellNI := sh32.NewProc("Shell_NotifyIconW")
 	shellNI.Call(0, uintptr(unsafe.Pointer(&nid))) // NIM_ADD
@@ -69,7 +69,7 @@ func (t *Tray) Run() {
 	nid.uFlags = 0x10
 	nid.dwInfoFlags = 0x00000001
 	nid.uTimeoutOrVer = 3000
-	copyUTF16(nid.szInfo[:], "OneCCRouter 已启动")
+	copyUTF16(nid.szInfo[:], "OneLLMRouter 已启动")
 	copyUTF16(nid.szInfoTitle[:], fmt.Sprintf("localhost:%d", t.port))
 	shellNI.Call(1, uintptr(unsafe.Pointer(&nid))) // NIM_MODIFY
 

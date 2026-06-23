@@ -1,5 +1,5 @@
-# OneCCRouter 完整配置文件
-# 复制为 onecc-router.yaml 并修改
+# OneLLMRouter 完整配置文件
+# 复制为 onellm-router.yaml 并修改
 
 server:
   host: "127.0.0.1"
@@ -7,7 +7,7 @@ server:
 
 log:
   level: "info"           # debug, info, warn, error
-  dir: "~/.onecc/logs"    # 日志目录，按日期滚动
+  dir: "~/.onellm/logs"    # 日志目录，按日期滚动
   max_age_days: 30         # 保留天数
 
 proxy:

@@ -1,4 +1,4 @@
-module github.com/kkroid/onecc-router
+module github.com/kkroid/onellm-router
 
 go 1.25.0
 
