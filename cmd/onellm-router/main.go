@@ -137,7 +137,7 @@ func serveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create direct client: %w", err)
 			}
-			proxyHandler := proxy.NewHandler(resolver, tokenMgr, httpClient, directClient, logger)
+				proxyHandler := proxy.NewHandler(resolver, tokenMgr, httpClient, directClient, logger)
 			proxyHandler.ErrorHook = ui.ErrorNotify
 
 			logger.Info("onellm-router starting",
@@ -149,6 +149,15 @@ func serveCmd() *cobra.Command {
 
 			fmt.Fprintf(os.Stderr, "HTTP: http://%s:%d  |  %d providers, %d models\n",
 				cfg.Server.Host, cfg.Server.HTTPPort, len(providers), len(resolver.AllModelIDs()))
+
+			for _, p := range providers {
+				logger.Info("provider",
+					"name", p.Name,
+					"prefix", p.Prefix,
+					"use_proxy", p.ShouldUseProxy(),
+					"has_openai_url", p.OpenAIBaseURL != "",
+				)
+			}
 
 			printClaudeCodeSettings(cfg)
 
@@ -292,6 +301,7 @@ func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler 
 		proxyHandler.ServeOpenAI(w, r)
 	})
 	mux.Handle("/openai/v1/chat/completions", withPanicRecover(openaiH, logger))
+	mux.Handle("/openai/chat/completions", withPanicRecover(openaiH, logger)) // some tools omit /v1
 	}
 
 func printClaudeCodeSettings(cfg *config.Config) {
@@ -398,7 +408,7 @@ func makeHTTPClient(proxyAddr string) (*http.Client, error) {
 		}
 		transport.DialContext = dialer.(netproxy.ContextDialer).DialContext
 	}
-	return &http.Client{Transport: transport, Timeout: 120 * time.Second}, nil
+	return &http.Client{Transport: transport}, nil
 }
 
 func installCmd() *cobra.Command {

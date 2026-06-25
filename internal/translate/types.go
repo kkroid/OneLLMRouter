@@ -4,8 +4,10 @@ package translate
 
 // AnthropicContentBlock is a content block in Anthropic messages.
 type AnthropicContentBlock struct {
-	Type         string                 `json:"type"`                    // "text" | "image" | "tool_use" | "tool_result"
+	Type         string                 `json:"type"`                    // "text" | "image" | "tool_use" | "tool_result" | "thinking"
 	Text         string                 `json:"text,omitempty"`
+	Thinking     string                 `json:"thinking,omitempty"`      // for "thinking" (DeepSeek)
+	Signature    string                 `json:"signature,omitempty"`     // for "thinking" (DeepSeek)
 	Source       *ImageSource           `json:"source,omitempty"`       // for "image"
 	ID           string                 `json:"id,omitempty"`           // for "tool_use"
 	Name         string                 `json:"name,omitempty"`         // for "tool_use"

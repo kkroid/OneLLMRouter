@@ -2,7 +2,13 @@ package translate
 
 import (
 	"encoding/json"
+	"strings"
 )
+
+// sanitizeUTF8 replaces invalid UTF-8 sequences including lone surrogates.
+func sanitizeUTF8(s string) string {
+	return strings.ToValidUTF8(s, "�")
+}
 
 // TranslateResponse converts an OpenAI response to Anthropic format.
 func TranslateResponse(openai *OpenAIResponse, originalModel string) *AnthropicResponse {
@@ -130,7 +136,15 @@ func ReverseTranslateResponse(anthropic *AnthropicResponse, originalModel string
 	for i, block := range anthropic.Content {
 		switch block.Type {
 		case "text":
-			textParts = append(textParts, block.Text)
+			textParts = append(textParts, sanitizeUTF8(block.Text))
+		case "thinking":
+			t := block.Thinking
+			if t == "" {
+				t = block.Text
+			}
+			if t != "" {
+				textParts = append(textParts, sanitizeUTF8(t))
+			}
 		case "tool_use":
 			args, _ := json.Marshal(block.Input)
 			toolCalls = append(toolCalls, OpenAIToolCall{
@@ -145,14 +159,8 @@ func ReverseTranslateResponse(anthropic *AnthropicResponse, originalModel string
 		}
 	}
 
-	if len(textParts) == 1 {
-		message.Content = textParts[0]
-	} else if len(textParts) > 1 {
-		var parts []OpenAIContentPart
-		for _, t := range textParts {
-			parts = append(parts, OpenAIContentPart{Type: "text", Text: t})
-		}
-		message.Content = parts
+	if len(textParts) > 0 {
+		message.Content = strings.Join(textParts, "\n")
 	}
 
 	if len(toolCalls) > 0 {

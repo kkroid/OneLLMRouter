@@ -236,6 +236,12 @@ func parseContentBlock(b interface{}) (AnthropicContentBlock, error) {
 	if t, ok := m["text"].(string); ok {
 		block.Text = t
 	}
+	if t, ok := m["thinking"].(string); ok {
+		block.Thinking = t
+	}
+	if s, ok := m["signature"].(string); ok {
+		block.Signature = s
+	}
 	if n, ok := m["name"].(string); ok {
 		block.Name = n
 	}

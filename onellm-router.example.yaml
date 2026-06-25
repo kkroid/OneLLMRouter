@@ -3,7 +3,7 @@
 
 server:
   host: "127.0.0.1"
-  http_port: 3456        # Anthropic Messages API
+  http_port: 3456
 
 log:
   level: "info"           # debug, info, warn, error
@@ -25,6 +25,7 @@ providers:
   - name: "DeepSeek"
     prefix: "ds"
     base_url: "https://api.deepseek.com/anthropic"
+    openai_base_url: "https://api.deepseek.com"  # OpenAI 直通（零翻译），代码自动追加 /v1/chat/completions
     api_key: "sk-your-deepseek-key"
     proxy: false           # 国内直连，不走代理
     models:

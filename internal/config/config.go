@@ -38,12 +38,13 @@ type ProxyConfig struct {
 
 // ProviderConfig represents a single model provider.
 type ProviderConfig struct {
-	Name    string   `yaml:"name"`
-	Prefix  string   `yaml:"prefix"`
-	BaseURL string   `yaml:"base_url"`
-	APIKey  string   `yaml:"api_key"`
-	Models  []string `yaml:"models"`
-	Proxy   *bool   `yaml:"proxy,omitempty"` // nil=inherit global, true=use proxy, false=direct
+	Name          string   `yaml:"name"`
+	Prefix        string   `yaml:"prefix"`
+	BaseURL       string   `yaml:"base_url"`
+	OpenAIBaseURL string   `yaml:"openai_base_url"`
+	APIKey        string   `yaml:"api_key"`
+	Models        []string `yaml:"models"`
+	Proxy         *bool    `yaml:"proxy,omitempty"` // nil=inherit global, true=use proxy, false=direct
 }
 
 // ModelSlotsConfig maps Claude Code model slots to "prefix/model" identifiers.
@@ -141,16 +142,16 @@ func (c *Config) Validate() error {
 
 // DefaultTokenFile returns the default path for the GitHub token.
 func DefaultTokenFile() string {
-	return filepath.Join(DefaultOneccDir(), "github_token")
+	return filepath.Join(DefaultUserDir(), "github_token")
 }
 
-// DefaultOneccDir returns the OneCC user data directory.
-func DefaultOneccDir() string {
+// DefaultUserDir returns the OneLLMRouter user data directory.
+func DefaultUserDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".onecc"
+		return ".onellm"
 	}
-	return filepath.Join(home, ".onecc")
+	return filepath.Join(home, ".onellm")
 }
 
 func expandHome(path string) string {
