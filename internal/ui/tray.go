@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -14,6 +16,51 @@ const (
 	cmdRestart = 1002
 	cmdQuit    = 1003
 )
+
+var (
+	trayNid   *nidStruct
+	blueIcon  uintptr
+	yellowIcon uintptr
+	warnTimer *time.Timer
+	warnMu    sync.Mutex
+)
+
+// FlashWarning turns the tray icon yellow for 3 seconds.
+// Consecutive calls reset the timer (icon stays yellow).
+// Safe to call when no tray exists (no-op).
+func FlashWarning() {
+	if trayNid == nil {
+		return
+	}
+	warnMu.Lock()
+	defer warnMu.Unlock()
+	sh32 := windows.NewLazySystemDLL("shell32.dll")
+	shellNI := sh32.NewProc("Shell_NotifyIconW")
+
+	// Swap to yellow
+	trayNid.hIcon = yellowIcon
+	trayNid.uFlags = 0x00000001 // NIF_ICON
+	shellNI.Call(1, uintptr(unsafe.Pointer(trayNid))) // NIM_MODIFY
+
+	// System notification beep (MB_ICONASTERISK)
+	if bellEnabled {
+		user32 := windows.NewLazySystemDLL("user32.dll")
+		user32.NewProc("MessageBeep").Call(0x00000040)
+	}
+
+	// Reset debounce timer
+	if warnTimer != nil {
+		warnTimer.Stop()
+	}
+	warnTimer = time.AfterFunc(3*time.Second, func() {
+		warnMu.Lock()
+		defer warnMu.Unlock()
+		if trayNid == nil { return }
+		trayNid.hIcon = blueIcon
+		trayNid.uFlags = 0x00000001
+		shellNI.Call(1, uintptr(unsafe.Pointer(trayNid)))
+	})
+}
 
 type Tray struct {
 	hwnd uintptr
@@ -52,6 +99,15 @@ func (t *Tray) Run() {
 		uintptr(unsafe.Pointer(&icoBytes[22])), uintptr(len(icoBytes)-22),
 		1, 0x00030000, 16, 16, 0x00000001,
 	)
+	blueIcon = hicon
+
+	// Preload yellow warning icon
+	yicoBytes := trayIconBytesYellow()
+	yicon, _, _ := u32.NewProc("CreateIconFromResourceEx").Call(
+		uintptr(unsafe.Pointer(&yicoBytes[22])), uintptr(len(yicoBytes)-22),
+		1, 0x00030000, 16, 16, 0x00000001,
+	)
+	yellowIcon = yicon
 
 	var nid nidStruct
 	nid.cbSize = uint32(unsafe.Sizeof(nid))
@@ -64,6 +120,7 @@ func (t *Tray) Run() {
 
 	shellNI := sh32.NewProc("Shell_NotifyIconW")
 	shellNI.Call(0, uintptr(unsafe.Pointer(&nid))) // NIM_ADD
+	trayNid = &nid
 
 	// Startup balloon only — one notification on launch
 	nid.uFlags = 0x10

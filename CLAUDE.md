@@ -203,3 +203,51 @@ curl -N -X POST http://localhost:3456/openai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
 ```
+
+## 问题排查
+
+### 通过日志定位问题
+
+日志是 JSON 行，每个请求一条。关键字段：`status`、`error`、`model`、`provider`、`path`、`duration_ms`。
+
+```bash
+# 查看最近 50 条请求
+tail -50 ~/.onellm/logs/onellm-router-$(date +%F).log
+
+# 只看错误
+grep '"status":[45]' ~/.onellm/logs/onellm-router-*.log
+
+# 查看 WARN 级别
+grep '"level":"WARN"' ~/.onellm/logs/onellm-router-*.log
+```
+
+### 常见错误速查
+
+| error 关键字 | 根因 | 排查方向 |
+|-------------|------|---------|
+| `Insufficient Balance` | DeepSeek 余额不足 | 充值 |
+| `context canceled` | 客户端主动断开 | 通常正常（Ctrl+C / 切换模型） |
+| `context deadline exceeded` | 上游响应太慢 | 非流式 2min 超时，可能是模型卡住 |
+| `parse response: unexpected end of JSON` | 响应体被截断 | 上游中途断连，或 LimitReader 超限 |
+| `invalid max_tokens` | 客户端传了非法值 | 客户端 bug，代理不兜底 |
+| `model names are ... but you passed` | 模型名不匹配 | OpenAI 端点检查是否含 `[1m]` 后缀 |
+| `connection forcibly closed` + `127.0.0.1:1082` | SOCKS5 代理断开 | 检查 provider 是否漏配 `proxy: false` |
+| `stream truncated: no` | SSE 流未正常结束 | 上游断连，`[DONE]`/`message_stop` 未收到 |
+| `skip malformed stream chunk` | SSE chunk JSON 损坏 | 上游返回了非标准格式 |
+
+### 区分"代理问题"和"上游/客户端问题"
+
+- 错误在 `error` 字段且被 `{}` 包裹 → 上游返回的，代理只是透传（如 `{"error":{...}}`）
+- 错误以 `copilot api` / `external api` / `upstream` 开头 → 代理层与上游通信失败
+- `status: 200` 但客户端报错 → 检查响应 body 内容，可能是格式不兼容
+- `status: 502` → 代理无法连接上游（网络/DNS/代理断开）
+- `status: 400` → 大多为上游拒绝请求，代理正确透传
+
+### 测试流程
+
+测试必须：
+1. **另起端口**（默认 3465），**后台进程**，不干扰生产 3457
+2. **看响应内容**，不只 HTTP 状态码和大小
+3. 测试完清理
+
+详见 memory 中的 [[testing-methodology]]。

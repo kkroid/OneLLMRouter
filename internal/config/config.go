@@ -22,6 +22,7 @@ type Config struct {
 type ServerConfig struct {
 	Host     string `yaml:"host"`
 	HTTPPort int    `yaml:"http_port"`
+	Bell     *bool  `yaml:"bell,omitempty"` // nil or true = beep on error, false = silent
 }
 
 // LogConfig holds logging settings.

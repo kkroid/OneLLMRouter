@@ -34,7 +34,7 @@ type AnthropicRequest struct {
 	Model         string              `json:"model"`
 	Messages      []AnthropicMessage  `json:"messages"`
 	System        interface{}         `json:"system,omitempty"` // string or []contentBlock
-	MaxTokens     int                 `json:"max_tokens"`
+	MaxTokens     int                 `json:"max_tokens,omitempty"`
 	Stream        bool                `json:"stream,omitempty"`
 	Temperature   *float64            `json:"temperature,omitempty"`
 	TopP          *float64            `json:"top_p,omitempty"`

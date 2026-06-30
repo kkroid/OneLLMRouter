@@ -27,6 +27,7 @@ type RequestMeta struct {
 	TTFBMs       int64  // time to first byte in ms (relative)
 	Provider     string // "cp" or "ds"
 	Error        string // non-empty = request failed
+	MaxTokens    int    // from request body, for debugging
 	start        time.Time
 }
 

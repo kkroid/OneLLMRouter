@@ -137,8 +137,11 @@ func serveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create direct client: %w", err)
 			}
-				proxyHandler := proxy.NewHandler(resolver, tokenMgr, httpClient, directClient, logger)
-			proxyHandler.ErrorHook = ui.ErrorNotify
+			// Bell: beep on error, default on
+			bell := cfg.Server.Bell == nil || *cfg.Server.Bell
+			ui.SetBell(bell)
+
+			proxyHandler := proxy.NewHandler(resolver, tokenMgr, httpClient, directClient, logger)
 
 			logger.Info("onellm-router starting",
 				"version", version,
@@ -260,6 +263,10 @@ func writeModelList(w http.ResponseWriter, resolver *router.Resolver) {
 
 func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler *proxy.Handler, tokenMgr *auth.TokenManager, cfg *config.Config, logger *slog.Logger) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("OneLLM Proxy — OK"))
 	})
@@ -363,6 +370,9 @@ func withRequestID(next http.Handler, logger *slog.Logger) http.Handler {
 		}
 		if meta.Model != "" {
 			attrs = append(attrs, "model", meta.Model, "provider", meta.Provider, "stream", meta.Stream)
+		}
+		if meta.MaxTokens > 0 {
+			attrs = append(attrs, "max_tokens", meta.MaxTokens)
 		}
 		if meta.TTFBMs > 0 {
 			attrs = append(attrs, "ttfb_ms", meta.TTFBMs)

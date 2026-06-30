@@ -3,9 +3,6 @@ package ui
 import (
 	"sync"
 	"time"
-	"unsafe"
-
-	"golang.org/x/sys/windows"
 )
 
 type rateEntry struct {
@@ -13,23 +10,23 @@ type rateEntry struct {
 }
 
 var (
-	rateMu  sync.Mutex
-	rateMap = make(map[string]*rateEntry)
+	rateMu      sync.Mutex
+	rateMap     = make(map[string]*rateEntry)
+	bellEnabled = true // default on, set via SetBell()
 )
 
-// ErrorNotify shows a Windows error dialog. Same key only once per 5 min.
+// ErrorNotify flashes the tray icon yellow. Same key only once per 5 min.
+// Safe to call when no tray exists (no-op).
 func ErrorNotify(title, message string) {
 	key := title + "\x00" + message
 	if !rateOK(key) {
 		return
 	}
-	msgBox(title, message, 0x00000010) // MB_ICONERROR
+	FlashWarning()
 }
 
-// InfoNotify shows an info dialog (not rate-limited).
-func InfoNotify(title, message string) {
-	msgBox(title, message, 0x00000040) // MB_ICONINFORMATION
-}
+// SetBell toggles the system beep on error. Default is true.
+func SetBell(on bool) { bellEnabled = on }
 
 func rateOK(key string) bool {
 	rateMu.Lock()
@@ -40,12 +37,4 @@ func rateOK(key string) bool {
 	}
 	rateMap[key] = &rateEntry{until: now.Add(5 * time.Minute)}
 	return true
-}
-
-func msgBox(title, text string, flags uint32) {
-	t, _ := windows.UTF16PtrFromString(title)
-	b, _ := windows.UTF16PtrFromString(text)
-	user32 := windows.NewLazySystemDLL("user32.dll")
-	p := user32.NewProc("MessageBoxW")
-	p.Call(0, uintptr(unsafe.Pointer(b)), uintptr(unsafe.Pointer(t)), uintptr(flags))
 }

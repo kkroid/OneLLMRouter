@@ -4,6 +4,7 @@
 server:
   host: "127.0.0.1"
   http_port: 3456
+  # bell: false    # 关闭错误提示音，默认开启
 
 log:
   level: "info"           # debug, info, warn, error

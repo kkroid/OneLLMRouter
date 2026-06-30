@@ -33,7 +33,6 @@ type Handler struct {
 	ProxyClient  *http.Client // requests through SOCKS5 proxy
 	DirectClient *http.Client // requests without proxy
 	Logger       *slog.Logger
-	ErrorHook    func(title, msg string)
 }
 
 // NewHandler creates a proxy Handler.
@@ -95,6 +94,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	meta.Model = fullModel
 	meta.Provider = resolved.Provider.Prefix
 	meta.Stream = body.Stream
+	meta.MaxTokens = body.MaxTokens
 
 	// Track TTFB via response writer
 	w = &ttfbWriter{ResponseWriter: w, meta: meta}
@@ -332,14 +332,6 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, message string) 
 	if tw, ok := w.(*ttfbWriter); ok && tw.meta != nil {
 		tw.meta.Error = message
 	}
-	// Popup for critical upstream errors
-	if h.ErrorHook != nil && (status >= 500 || status == 429) {
-		title := "OneLLMRouter"
-		if strings.Contains(message, "copilot") || strings.Contains(message, "token") {
-			title = "Copilot Error"
-		}
-		h.ErrorHook(title, message)
-	}
 	h.writeJSON(w, status, map[string]interface{}{
 		"error": map[string]interface{}{
 			"type":    "api_error",
@@ -413,6 +405,7 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 	meta.Model = fullModel
 	meta.Provider = resolved.Provider.Prefix
 	meta.Stream = body.Stream
+	meta.MaxTokens = body.MaxTokens
 	w = &ttfbWriter{ResponseWriter: w, meta: meta}
 
 	if resolved.Provider.Prefix == "cp" || resolved.Provider.OpenAIBaseURL != "" {
@@ -436,6 +429,8 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 	} else {
 		url = strings.TrimRight(resolved.Provider.OpenAIBaseURL, "/") + "/v1/chat/completions"
 		client = h.clientFor(resolved.Provider)
+		// OpenAI API doesn't support anthropic [1m] suffix — strip from model name
+		body.Model = strings.TrimSuffix(body.Model, "[1m]")
 	}
 
 	reqBody, _ := json.Marshal(body)
