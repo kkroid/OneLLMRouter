@@ -62,7 +62,8 @@ func tokenManagerForTest(t *testing.T) *auth.TokenManager {
 }
 
 // anthropicSSEPattern verifies the output follows Anthropic SSE spec:
-//   event: <type>\ndata: <json>\n\n
+//
+//	event: <type>\ndata: <json>\n\n
 var anthropicSSEPattern = regexp.MustCompile(`event: (\w+)\ndata: (.+)\n\n`)
 
 // parseSSEEvents parses all SSE events from body and returns a map of event type → count.
@@ -535,5 +536,74 @@ func TestHandler_CopilotError(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	if errMap, _ := resp["error"].(map[string]interface{}); errMap == nil {
 		t.Error("expected error response from copilot API failure")
+	}
+}
+
+func TestExternalRequestUsesTimeoutOverride(t *testing.T) {
+	t.Setenv("ONELLM_EXTERNAL_REQUEST_TIMEOUT_MS", "25")
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		deadline, ok := request.Context().Deadline()
+		if !ok || time.Until(deadline) > 500*time.Millisecond {
+			return nil, context.DeadlineExceeded
+		}
+		body := `{"id":"msg_1","type":"message","role":"assistant","model":"m1","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", BaseURL: "http://unused", Models: []string{"m1"},
+	}})
+	handler := &Handler{Resolver: resolver, ProxyClient: client, DirectClient: client, Logger: slog.New(slog.DiscardHandler)}
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestExternalStreamUsesFirstEventTimeoutOverride(t *testing.T) {
+	t.Setenv("ONELLM_STREAM_FIRST_EVENT_TIMEOUT_MS", "20")
+	t.Setenv("ONELLM_EXTERNAL_STREAM_TIMEOUT_MS", "5000")
+	reader, writer := io.Pipe()
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       reader,
+			Request:    request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", BaseURL: "http://unused", Models: []string{"m1"},
+	}})
+	handler := &Handler{Resolver: resolver, ProxyClient: client, DirectClient: client, Logger: slog.New(slog.DiscardHandler)}
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(recorder, request)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		writer.Close()
+		<-done
+		t.Fatal("stream did not honor first-event timeout")
+	}
+	writer.Close()
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Body.Len() != 0 {
+		t.Fatalf("unexpected stalled-stream output: %q", recorder.Body.String())
 	}
 }

@@ -1,18 +1,18 @@
 package proxy
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/kkroid/onellm-router/internal/auth"
+	"github.com/kkroid/onellm-router/internal/catalog"
 	onellmLog "github.com/kkroid/onellm-router/internal/log"
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/translate"
@@ -20,10 +20,10 @@ import (
 
 // Copilot HTTP headers required by the API.
 var copilotHeaders = map[string]string{
-	"copilot-integration-id":  "vscode-chat",
-	"user-agent":              "GitHubCopilotChat/0.26.7",
-	"editor-version":          "vscode/1.104.1",
-	"editor-plugin-version":   "copilot-chat/0.26.7",
+	"copilot-integration-id": "vscode-chat",
+	"user-agent":             "GitHubCopilotChat/0.26.7",
+	"editor-version":         "vscode/1.104.1",
+	"editor-plugin-version":  "copilot-chat/0.26.7",
 }
 
 // Handler dispatches Anthropic API requests to providers.
@@ -33,17 +33,20 @@ type Handler struct {
 	ProxyClient  *http.Client // requests through SOCKS5 proxy
 	DirectClient *http.Client // requests without proxy
 	Logger       *slog.Logger
+	Catalog      *catalog.Service
 }
 
 // NewHandler creates a proxy Handler.
 func NewHandler(resolver *router.Resolver, tokenMgr *auth.TokenManager, proxyClient, directClient *http.Client, logger *slog.Logger) *Handler {
-	return &Handler{
+	handler := &Handler{
 		Resolver:     resolver,
 		TokenManager: tokenMgr,
 		ProxyClient:  proxyClient,
 		DirectClient: directClient,
 		Logger:       logger,
 	}
+	handler.Catalog = catalog.New(handler.clientFor)
+	return handler
 }
 
 func (h *Handler) clientFor(p *router.Provider) *http.Client {
@@ -51,6 +54,13 @@ func (h *Handler) clientFor(p *router.Provider) *http.Client {
 		return h.ProxyClient
 	}
 	return h.DirectClient
+}
+
+func (h *Handler) catalogService() *catalog.Service {
+	if h.Catalog == nil {
+		h.Catalog = catalog.New(h.clientFor)
+	}
+	return h.Catalog
 }
 
 // ServeHTTP implements the unified /v1/messages handler.
@@ -127,9 +137,9 @@ func (h *Handler) copilotHandler(w http.ResponseWriter, r *http.Request, body *t
 	url := apiBase + "/chat/completions"
 
 	reqBody, _ := json.Marshal(openaiReq)
-	timeout := 60 * time.Second
+	timeout := copilotRequestTimeout()
 	if body.Stream {
-		timeout = 300 * time.Second
+		timeout = copilotStreamTimeout()
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
@@ -186,15 +196,17 @@ func (h *Handler) copilotHandler(w http.ResponseWriter, r *http.Request, body *t
 		return
 	}
 
-	h.streamCopilotResponse(w, resp.Body, body.Model)
+	if err := h.streamCopilotResponse(w, resp.Body, body.Model); err != nil && h.Logger != nil {
+		h.Logger.Warn("copilot stream", "error", err)
+	}
 }
 
 // streamCopilotResponse translates an OpenAI SSE stream to Anthropic SSE.
-func (h *Handler) streamCopilotResponse(w http.ResponseWriter, body io.Reader, model string) {
+func (h *Handler) streamCopilotResponse(w http.ResponseWriter, body io.Reader, model string) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		h.writeError(w, http.StatusInternalServerError, "streaming not supported")
-		return
+		return nil
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -212,28 +224,25 @@ func (h *Handler) streamCopilotResponse(w http.ResponseWriter, body io.Reader, m
 		ToolCalls:        make(map[int]*translate.ToolCallState),
 	}
 
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64*1024), 256*1024) // 64KB buffer
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	return streamLines(body, streamFirstEventTimeout(), streamIdleTimeout(), func(rawLine string) error {
+		line := strings.TrimSpace(rawLine)
 		if line == "" || !strings.HasPrefix(line, "data: ") {
-			continue
+			return nil
 		}
 
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
-			break
+			return nil
 		}
 
 		var chunk translate.OpenAIStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue // skip malformed chunks
+			return nil
 		}
 
 		events, err := translate.TranslateStreamChunk(&chunk, ctx)
 		if err != nil {
-			continue
+			return err
 		}
 
 		for _, ev := range events {
@@ -241,7 +250,8 @@ func (h *Handler) streamCopilotResponse(w http.ResponseWriter, body io.Reader, m
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, evJSON)
 			flusher.Flush()
 		}
-	}
+		return nil
+	})
 }
 
 // externalHandler proxies requests to external Anthropic-compatible APIs (direct passthrough).
@@ -253,9 +263,9 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 	apiKey := resolved.Provider.APIKey
 
 	reqBody, _ := json.Marshal(body)
-	timeout := 60 * time.Second
+	timeout := externalRequestTimeout()
 	if body.Stream {
-		timeout = 300 * time.Second
+		timeout = externalStreamTimeout()
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
@@ -271,6 +281,10 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 	if !body.Stream {
 		resp, err := h.clientFor(resolved.Provider).Do(req)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				h.writeError(w, http.StatusBadGateway, "timeout waiting for upstream response")
+				return
+			}
 			h.writeError(w, http.StatusBadGateway, "external api: "+err.Error())
 			return
 		}
@@ -306,17 +320,17 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 	w.WriteHeader(http.StatusOK)
 
 	flusher, _ := w.(http.Flusher)
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line != "" {
-			fmt.Fprintf(w, "%s\n", line)
-		} else {
-			fmt.Fprintf(w, "\n")
+	err = streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
+		if _, err := io.WriteString(w, line); err != nil {
+			return err
 		}
 		if flusher != nil {
 			flusher.Flush()
 		}
+		return nil
+	})
+	if err != nil && h.Logger != nil {
+		h.Logger.Warn("external stream", "error", err)
 	}
 }
 
@@ -340,11 +354,10 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, message string) 
 	})
 }
 
-
 // ttfbWriter captures time-to-first-byte for logging.
 type ttfbWriter struct {
 	http.ResponseWriter
-	meta     *onellmLog.RequestMeta
+	meta       *onellmLog.RequestMeta
 	firstWrite bool
 }
 
@@ -360,6 +373,25 @@ func (tw *ttfbWriter) Write(b []byte) (int, error) {
 
 func (tw *ttfbWriter) WriteHeader(code int) {
 	tw.ResponseWriter.WriteHeader(code)
+}
+
+type flushWriter struct {
+	writer  io.Writer
+	flusher http.Flusher
+	meta    *onellmLog.RequestMeta
+}
+
+func (writer flushWriter) Write(data []byte) (int, error) {
+	written, err := writer.writer.Write(data)
+	if written > 0 {
+		if writer.meta != nil {
+			writer.meta.MarkStreamEvent(written)
+		}
+		if writer.flusher != nil {
+			writer.flusher.Flush()
+		}
+	}
+	return written, err
 }
 
 func (tw *ttfbWriter) Flush() {
@@ -434,7 +466,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 	}
 
 	reqBody, _ := json.Marshal(body)
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), openAIRequestTimeout())
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
@@ -499,21 +531,17 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1<<20)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line != "" {
-			fmt.Fprintf(w, "%s\n", line)
-		} else {
-			fmt.Fprintf(w, "\n")
+	err = streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
+		if _, err := io.WriteString(w, line); err != nil {
+			return err
 		}
 		if flusher != nil {
 			flusher.Flush()
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		h.Logger.Warn("openai direct stream scanner", "error", err)
+		return nil
+	})
+	if err != nil && h.Logger != nil {
+		h.Logger.Warn("openai direct stream", "error", err)
 	}
 }
 
@@ -533,7 +561,7 @@ func (h *Handler) openaiTranslateHandler(w http.ResponseWriter, r *http.Request,
 	apiKey := resolved.Provider.APIKey
 
 	reqBody, _ := json.Marshal(anthropicReq)
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), openAIRequestTimeout())
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
@@ -595,20 +623,217 @@ func (h *Handler) openaiTranslateHandler(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusOK)
 
 	flusher, _ := w.(http.Flusher)
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1<<20)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line != "" {
-			fmt.Fprintf(w, "%s\n", line)
-		} else {
-			fmt.Fprintf(w, "\n")
+	err = streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
+		if _, err := io.WriteString(w, line); err != nil {
+			return err
 		}
 		if flusher != nil {
 			flusher.Flush()
 		}
+		return nil
+	})
+	if err != nil && h.Logger != nil {
+		h.Logger.Warn("openai translate stream", "error", err, "request_id", onellmLog.RequestIDFromContext(r.Context()))
 	}
-	if err := scanner.Err(); err != nil {
-		h.Logger.Warn("openai translate stream scanner", "error", err, "request_id", onellmLog.RequestIDFromContext(r.Context()))
+}
+
+// ServeResponses proxies to the Responses API (/v1/responses), used by Codex CLI.
+func (h *Handler) ServeResponses(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
 	}
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "read request body: "+err.Error())
+		return
+	}
+	var reqMeta struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+	}
+	if err := json.Unmarshal(rawBody, &reqMeta); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	fullModel := reqMeta.Model
+	if fullModel == "" {
+		h.writeError(w, http.StatusBadRequest, "no model specified")
+		return
+	}
+	resolved := h.Resolver.Resolve(fullModel)
+	if resolved == nil {
+		models := h.Resolver.AllModelIDs()
+		h.writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("unknown model: %s. Available: %s", fullModel, strings.Join(models, ",")))
+		return
+	}
+	if resolved.Provider.ResponsesBaseURL == "" {
+		h.writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("provider %q does not support the Responses API", resolved.Provider.Prefix))
+		return
+	}
+	var bodyMap map[string]interface{}
+	if err := json.Unmarshal(rawBody, &bodyMap); err == nil {
+		bodyMap["model"] = resolved.Model
+		rawBody, _ = json.Marshal(bodyMap)
+	}
+	meta := onellmLog.RequestMetaFromContext(r.Context())
+	meta.Model = fullModel
+	meta.Provider = resolved.Provider.Prefix
+	meta.Stream = reqMeta.Stream
+	w = &ttfbWriter{ResponseWriter: w, meta: meta}
+	h.responsesDirectHandler(w, r, rawBody, reqMeta.Stream, resolved)
+}
+
+func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request, rawBody []byte, stream bool, resolved *router.ResolveResult) {
+	url := strings.TrimRight(resolved.Provider.ResponsesBaseURL, "/") + "/v1/responses"
+	client := h.clientFor(resolved.Provider)
+	requestContext := r.Context()
+	cancel := func() {}
+	if !stream {
+		requestContext, cancel = context.WithTimeout(r.Context(), openAIRequestTimeout())
+	}
+	defer cancel()
+	meta := onellmLog.RequestMetaFromContext(r.Context())
+	req, err := http.NewRequestWithContext(requestContext, "POST", url, bytes.NewReader(rawBody))
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "create request: "+err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+resolved.Provider.APIKey)
+	if !stream {
+		meta.UpstreamStage = "headers"
+		resp, err := client.Do(req)
+		if err != nil {
+			meta.EndReason = "upstream_error"
+			h.writeError(w, http.StatusBadGateway, "headers: "+err.Error())
+			return
+		}
+		defer resp.Body.Close()
+		meta.UpstreamStatus = resp.StatusCode
+		meta.UpstreamStage = "body"
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			meta.EndReason = "upstream_error"
+			h.writeError(w, http.StatusBadGateway, "read response failed: "+err.Error())
+			return
+		}
+		if resp.StatusCode >= 400 {
+			meta.EndReason = "upstream_error"
+			h.writeError(w, resp.StatusCode, string(respBody))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(respBody)
+		meta.EndReason = "ok"
+		return
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	meta.UpstreamStage = "headers"
+	resp, err := client.Do(req)
+	if err != nil {
+		meta.EndReason = "upstream_error"
+		h.writeError(w, http.StatusBadGateway, "headers: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	meta.UpstreamStatus = resp.StatusCode
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		meta.EndReason = "upstream_error"
+		h.writeError(w, resp.StatusCode, string(respBody))
+		return
+	}
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(resp.StatusCode)
+
+	flusher, _ := w.(http.Flusher)
+	meta.UpstreamStage = "stream"
+	_, err = io.Copy(flushWriter{writer: w, flusher: flusher, meta: meta}, resp.Body)
+	meta.MarkStreamFinish()
+	if err != nil {
+		meta.Error = err.Error()
+		if r.Context().Err() != nil {
+			meta.EndReason = "client_cancel"
+		} else {
+			meta.EndReason = "upstream_error"
+		}
+		if h.Logger != nil {
+			h.Logger.Warn("responses stream copy", "error", err, "request_id", onellmLog.RequestIDFromContext(r.Context()))
+		}
+		return
+	}
+	meta.EndReason = "ok"
+}
+
+func (h *Handler) ServeModelList(w http.ResponseWriter, r *http.Request, endpointType router.EndpointType) {
+	providers := h.Resolver.Providers()
+	endpoints := []router.EndpointType{endpointType}
+	if endpointType == "" {
+		endpoints = []router.EndpointType{router.EndpointAnthropic, router.EndpointOpenAI, router.EndpointResponses}
+	}
+
+	all := make([]router.ModelEntry, 0)
+	responseModels := make([]catalog.Model, 0)
+	modelIndex := make(map[string]int)
+	sourceErrors := 0
+	for _, endpoint := range endpoints {
+		result := h.catalogService().List(r.Context(), providers, endpoint)
+		sourceErrors += len(result.Errors)
+		for _, sourceErr := range result.Errors {
+			if h.Logger != nil {
+				h.Logger.Warn("model catalog source", "provider", sourceErr.Provider, "endpoint", endpoint, "error", sourceErr.Err)
+			}
+		}
+		for _, model := range result.Models {
+			if endpoint == router.EndpointResponses {
+				responseModels = append(responseModels, model)
+			}
+			if index, ok := modelIndex[model.ID]; ok {
+				all[index].EndpointTypes = appendEndpointType(all[index].EndpointTypes, model.Endpoint)
+				continue
+			}
+			modelIndex[model.ID] = len(all)
+			all = append(all, router.ModelEntry{
+				ID:            model.ID,
+				Object:        "model",
+				Created:       model.Created,
+				OwnedBy:       model.OwnedBy,
+				EndpointTypes: []router.EndpointType{model.Endpoint},
+			})
+		}
+	}
+	if len(all) == 0 && sourceErrors > 0 {
+		h.writeError(w, http.StatusBadGateway, "model discovery failed")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if endpointType == router.EndpointResponses {
+		data, err := catalog.MarshalCodex(responseModels)
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "encode model catalog failed")
+			return
+		}
+		_, _ = w.Write(data)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"object": "list", "data": all})
+}
+
+func appendEndpointType(endpointTypes []router.EndpointType, endpoint router.EndpointType) []router.EndpointType {
+	for _, existing := range endpointTypes {
+		if existing == endpoint {
+			return endpointTypes
+		}
+	}
+	return append(endpointTypes, endpoint)
 }

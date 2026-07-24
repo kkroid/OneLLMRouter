@@ -56,12 +56,21 @@ func TestStreamChunk_TextThenToolSwitch(t *testing.T) {
 		Choices: []OpenAIStreamChoice{
 			{Index: 0, Delta: OpenAIStreamDelta{
 				ToolCalls: []OpenAIToolCallDelta{
-					{Index: 0, Function: &OpenAIToolFunctionDelta{Name: "get_weather", Arguments: `{}`}},
+					{Index: 0, ID: "call_weather", Function: &OpenAIToolFunctionDelta{Name: "get_weather", Arguments: `{}`}},
 				},
 			}},
 		},
 	}
 	events2, _ := TranslateStreamChunk(chunk2, ctx)
+	for _, ev := range events2 {
+		if ev.Type == "content_block_stop" || ev.Type == "content_block_start" {
+			t.Fatalf("tool blocks must wait for finish: %+v", events2)
+		}
+	}
+	finishReason := "tool_calls"
+	events2, _ = TranslateStreamChunk(&OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{FinishReason: &finishReason}},
+	}, ctx)
 	hasTextStop := false
 	hasToolStart := false
 	for _, ev := range events2 {
@@ -91,13 +100,22 @@ func TestStreamChunk_MultipleTools(t *testing.T) {
 		Choices: []OpenAIStreamChoice{
 			{Index: 0, Delta: OpenAIStreamDelta{
 				ToolCalls: []OpenAIToolCallDelta{
-					{Index: 0, Function: &OpenAIToolFunctionDelta{Name: "get_weather", Arguments: `{"city":"bj"}`}},
-					{Index: 1, Function: &OpenAIToolFunctionDelta{Name: "get_time", Arguments: `{"tz":"utc"}`}},
+					{Index: 0, ID: "call_weather", Function: &OpenAIToolFunctionDelta{Name: "get_weather", Arguments: `{"city":"bj"}`}},
+					{Index: 1, ID: "call_time", Function: &OpenAIToolFunctionDelta{Name: "get_time", Arguments: `{"tz":"utc"}`}},
 				},
 			}},
 		},
 	}
 	events, _ := TranslateStreamChunk(chunk, ctx)
+	for _, ev := range events {
+		if ev.Type == "content_block_start" {
+			t.Fatalf("tool blocks must wait for finish: %+v", events)
+		}
+	}
+	finishReason := "tool_calls"
+	events, _ = TranslateStreamChunk(&OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{FinishReason: &finishReason}},
+	}, ctx)
 
 	startCount := 0
 	for _, ev := range events {

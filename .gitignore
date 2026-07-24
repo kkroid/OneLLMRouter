@@ -1,5 +1,6 @@
 # 正式配置文件 (含 API Key)
 onellm-router.yaml
+onellm-router-v*.yaml
 
 # 编译产物
 dist/
@@ -24,6 +25,5 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
-dist/
 v1.1.0-plan.md
 onellm-router.exe

@@ -16,19 +16,27 @@ import (
 type contextKey string
 
 const (
-	requestIDKey  contextKey = "request_id"
+	requestIDKey   contextKey = "request_id"
 	requestMetaKey contextKey = "request_meta"
 )
 
 // RequestMeta holds per-request metadata for logging.
 type RequestMeta struct {
-	Model        string
-	Stream       bool
-	TTFBMs       int64  // time to first byte in ms (relative)
-	Provider     string // "cp" or "ds"
-	Error        string // non-empty = request failed
-	MaxTokens    int    // from request body, for debugging
-	start        time.Time
+	Model           string
+	Stream          bool
+	TTFBMs          int64  // time to first byte in ms (relative)
+	FirstEventMs    int64  // time to first upstream stream event in ms
+	LastEventAgeMs  int64  // idle time since last upstream stream event at finish
+	Provider        string // "cp" or "ds"
+	Error           string // non-empty = request failed
+	MaxTokens       int    // from request body, for debugging
+	UpstreamStage   string // headers, body, stream
+	UpstreamStatus  int
+	SSEEvents       int
+	BytesOut        int64
+	EndReason       string // ok, upstream_timeout, stream_idle_timeout, client_cancel, upstream_error
+	start           time.Time
+	lastStreamEvent time.Time
 }
 
 // MarkStart records the request start time for TTFB calculation.
@@ -40,6 +48,24 @@ func (m *RequestMeta) MarkStart() {
 func (m *RequestMeta) MarkFirstByte() {
 	if m.TTFBMs == 0 {
 		m.TTFBMs = time.Since(m.start).Milliseconds()
+	}
+}
+
+// MarkStreamEvent records upstream streaming progress for diagnostics.
+func (m *RequestMeta) MarkStreamEvent(bytes int) {
+	now := time.Now()
+	if m.FirstEventMs == 0 {
+		m.FirstEventMs = now.Sub(m.start).Milliseconds()
+	}
+	m.lastStreamEvent = now
+	m.SSEEvents++
+	m.BytesOut += int64(bytes)
+}
+
+// MarkStreamFinish records stream idle age when the request finishes.
+func (m *RequestMeta) MarkStreamFinish() {
+	if !m.lastStreamEvent.IsZero() {
+		m.LastEventAgeMs = time.Since(m.lastStreamEvent).Milliseconds()
 	}
 }
 
@@ -58,10 +84,10 @@ func RequestMetaFromContext(ctx context.Context) *RequestMeta {
 
 // dailyWriter rotates log files by date (midnight local time).
 type dailyWriter struct {
-	mu       sync.Mutex
-	dir      string
-	today    string
-	file     *os.File
+	mu    sync.Mutex
+	dir   string
+	today string
+	file  *os.File
 }
 
 func newDailyWriter(dir string) (*dailyWriter, error) {

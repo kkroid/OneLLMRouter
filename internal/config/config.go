@@ -11,10 +11,11 @@ import (
 
 // Config represents the onellm-router configuration.
 type Config struct {
-	Server    ServerConfig     `yaml:"server"`
-	Log       LogConfig        `yaml:"log"`
-	Proxy     ProxyConfig      `yaml:"proxy"`
-	Providers []ProviderConfig `yaml:"providers"`
+	Server     ServerConfig     `yaml:"server"`
+	Log        LogConfig        `yaml:"log"`
+	Proxy      ProxyConfig      `yaml:"proxy"`
+	Codex      CodexConfig      `yaml:"codex"`
+	Providers  []ProviderConfig `yaml:"providers"`
 	ModelSlots ModelSlotsConfig `yaml:"model_slots"`
 }
 
@@ -37,23 +38,34 @@ type ProxyConfig struct {
 	Socks5 string `yaml:"socks5"`
 }
 
+type CodexConfig struct {
+	OverwriteCatalog bool                        `yaml:"overwrite_catalog"`
+	Models           map[string]CodexModelConfig `yaml:"models"`
+}
+
+type CodexModelConfig struct {
+	DefaultReasoningLevel    string   `yaml:"default_reasoning_level"`
+	SupportedReasoningLevels []string `yaml:"supported_reasoning_levels"`
+}
+
 // ProviderConfig represents a single model provider.
 type ProviderConfig struct {
-	Name          string   `yaml:"name"`
-	Prefix        string   `yaml:"prefix"`
-	BaseURL       string   `yaml:"base_url"`
-	OpenAIBaseURL string   `yaml:"openai_base_url"`
-	APIKey        string   `yaml:"api_key"`
-	Models        []string `yaml:"models"`
-	Proxy         *bool    `yaml:"proxy,omitempty"` // nil=inherit global, true=use proxy, false=direct
+	Name             string   `yaml:"name"`
+	Prefix           string   `yaml:"prefix"`
+	BaseURL          string   `yaml:"base_url"`
+	OpenAIBaseURL    string   `yaml:"openai_base_url"`
+	ResponsesBaseURL string   `yaml:"responses_base_url"` // OpenAI Responses API base (for Codex CLI direct passthrough)
+	APIKey           string   `yaml:"api_key"`
+	Models           []string `yaml:"models"`
+	Proxy            *bool    `yaml:"proxy,omitempty"` // nil=inherit global, true=use proxy, false=direct
 }
 
 // ModelSlotsConfig maps Claude Code model slots to "prefix/model" identifiers.
 type ModelSlotsConfig struct {
 	Default string `yaml:"default"`
-	Opus   string `yaml:"opus"`
-	Sonnet string `yaml:"sonnet"`
-	Haiku  string `yaml:"haiku"`
+	Opus    string `yaml:"opus"`
+	Sonnet  string `yaml:"sonnet"`
+	Haiku   string `yaml:"haiku"`
 	Fable   string `yaml:"fable"`
 }
 
@@ -71,6 +83,27 @@ func DefaultConfig() *Config {
 		},
 		Proxy: ProxyConfig{
 			Socks5: "127.0.0.1:1082",
+		},
+		Codex: CodexConfig{
+			OverwriteCatalog: true,
+			Models: map[string]CodexModelConfig{
+				"gpt-5.5": {
+					DefaultReasoningLevel:    "medium",
+					SupportedReasoningLevels: []string{"low", "medium", "high", "xhigh"},
+				},
+				"gpt-5.6-sol": {
+					DefaultReasoningLevel:    "low",
+					SupportedReasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
+				},
+				"gpt-5.6-terra": {
+					DefaultReasoningLevel:    "medium",
+					SupportedReasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
+				},
+				"gpt-5.6-luna": {
+					DefaultReasoningLevel:    "medium",
+					SupportedReasoningLevels: []string{"low", "medium", "high", "xhigh", "max"},
+				},
+			},
 		},
 	}
 }
@@ -104,8 +137,8 @@ func (c *Config) Validate() error {
 		if p.Prefix == "" {
 			return fmt.Errorf("providers[%d]: prefix 不能为空", i)
 		}
-		if len(p.Models) == 0 {
-			return fmt.Errorf("providers[%d] (%s): 至少需要一个模型（在 models: 下配置）", i, p.Prefix)
+		if len(p.Models) == 0 && p.BaseURL == "" && p.OpenAIBaseURL == "" && p.ResponsesBaseURL == "" {
+			return fmt.Errorf("providers[%d] (%s): 至少需要一个模型或 API 端点", i, p.Prefix)
 		}
 	}
 

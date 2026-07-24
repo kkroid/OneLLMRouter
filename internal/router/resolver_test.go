@@ -49,6 +49,51 @@ func TestResolverUnknownModel(t *testing.T) {
 	}
 }
 
+func TestResolverRejectsUnknownConfiguredSlashModel(t *testing.T) {
+	r := NewResolver([]Provider{{
+		Prefix: "mars",
+		Models: []string{"gpt-5.6-sol"},
+	}})
+
+	if result := r.Resolve("mars/not-configured"); result != nil {
+		t.Fatalf("unexpected configured-list bypass: %+v", result)
+	}
+}
+
+func TestResolverRejectsUnknownConfiguredLegacyModel(t *testing.T) {
+	r := NewResolver([]Provider{{
+		Prefix: "mars",
+		Models: []string{"gpt-5.6-sol"},
+	}})
+
+	if result := r.Resolve("mars-not-configured"); result != nil {
+		t.Fatalf("unexpected configured-list bypass: %+v", result)
+	}
+}
+
+func TestResolverAllowsNamespacedDynamicModel(t *testing.T) {
+	r := NewResolver([]Provider{{
+		Prefix:           "mars",
+		ResponsesBaseURL: "http://unused",
+	}})
+
+	result := r.Resolve("mars/anything")
+	if result == nil || result.Provider.Prefix != "mars" || result.Model != "anything" {
+		t.Fatalf("unexpected dynamic result: %+v", result)
+	}
+}
+
+func TestResolverRejectsBareDynamicFallback(t *testing.T) {
+	r := NewResolver([]Provider{{
+		Prefix:  "mars",
+		BaseURL: "http://unused",
+	}})
+
+	if result := r.Resolve("anything"); result != nil {
+		t.Fatalf("unexpected bare dynamic fallback: %+v", result)
+	}
+}
+
 func TestResolverAllModelIDs(t *testing.T) {
 	r := NewResolver([]Provider{
 		{Prefix: "cp", Name: "Copilot", Models: []string{"m1", "m2"}},
@@ -95,6 +140,19 @@ func TestResolverNoCopilotProvider(t *testing.T) {
 	cp := r.CopilotProvider()
 	if cp != nil {
 		t.Error("expected nil for missing copilot provider")
+	}
+}
+
+func TestProviderSupportsEndpointIncludesBuiltInCopilot(t *testing.T) {
+	provider := Provider{Prefix: "cp", Models: []string{"claude-opus-4.8"}}
+	if !provider.SupportsEndpoint(EndpointAnthropic) {
+		t.Fatal("built-in Copilot provider must support Anthropic")
+	}
+	if provider.SupportsEndpoint(EndpointOpenAI) {
+		t.Fatal("built-in Copilot provider must not support Chat Completions")
+	}
+	if provider.SupportsEndpoint(EndpointResponses) {
+		t.Fatal("built-in Copilot provider must not support Responses")
 	}
 }
 

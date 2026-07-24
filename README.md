@@ -23,6 +23,8 @@ Claude Code CLI     OpenAI 兼容工具
     └─────────────────────────┘
 ```
 
+协议翻译层采用轻量 Core IR：先将 Anthropic Messages 或 OpenAI Chat Completions 映射到内部中间表示，再输出目标协议，便于稳定处理文本、图片、工具调用和流式事件。
+
 ## API 端点
 
 | 格式 | 端点 | Base URL |
@@ -59,7 +61,7 @@ git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter
 pwsh build.ps1
 ```
 
-产物在 `dist/onellm-router-v1.2.0.exe`。
+产物在 `dist/onellm-router-v1.3.2.exe`。
 
 ### 2. 配置
 
@@ -80,6 +82,23 @@ log:
 
 proxy:
   socks5: "127.0.0.1:1082"
+
+codex:
+  overwrite_catalog: true  # 默认同时覆盖 ~/.codex/model-catalog.json
+  # 按 provider/ 后的基础模型名匹配；未知模型默认 low/medium/high/xhigh
+  models:
+    gpt-5.5:
+      default_reasoning_level: medium
+      supported_reasoning_levels: [low, medium, high, xhigh]
+    gpt-5.6-sol:
+      default_reasoning_level: low
+      supported_reasoning_levels: [low, medium, high, xhigh, max, ultra]
+    gpt-5.6-terra:
+      default_reasoning_level: medium
+      supported_reasoning_levels: [low, medium, high, xhigh, max, ultra]
+    gpt-5.6-luna:
+      default_reasoning_level: medium
+      supported_reasoning_levels: [low, medium, high, xhigh, max]
 
 providers:
   - name: "GitHub Copilot"
@@ -109,7 +128,7 @@ model_slots:
 ### 3. 启动
 
 ```bash
-.\dist\onellm-router-v1.2.0.exe
+.\dist\onellm-router-v1.3.2.exe
 ```
 
 启动时会打印 Claude Code 的 `settings.json`，直接复制使用。如果配置了 Copilot 但未登录，会自动弹出 GitHub 设备授权流程。Token 保存在 `~/.onellm/github_token`。
@@ -211,6 +230,10 @@ OneLLMRouter/
 ├── build.ps1                          # 编译脚本
 └── go.mod
 ```
+
+## 致谢与参考
+
+OneLLMRouter 1.3.2 的协议转换层重构参考了 [moon-bridge](https://github.com/ZhiYi-R/moon-bridge) 的 Core IR 设计思路：先将不同协议映射到内部中间表示，再由协议适配器输出目标格式。本项目没有直接复制 moon-bridge 的完整功能面，当前仍聚焦于 Anthropic Messages 与 OpenAI Chat Completions 的轻量互转。
 
 ## 配置参考
 

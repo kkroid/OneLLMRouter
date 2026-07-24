@@ -8,52 +8,11 @@ import (
 
 // TranslateRequest converts an Anthropic request to OpenAI format.
 func TranslateRequest(req *AnthropicRequest) (*OpenAIRequest, error) {
-	messages := make([]OpenAIMessage, 0, len(req.Messages)+1)
-
-	// System prompt → first message (handles both string and []block formats)
-	systemText := extractSystemText(req.System)
-	if systemText != "" {
-		messages = append(messages, OpenAIMessage{
-			Role:    "system",
-			Content: systemText,
-		})
+	core, err := AnthropicRequestToCore(req)
+	if err != nil {
+		return nil, err
 	}
-
-	// Convert messages
-	for _, msg := range req.Messages {
-		switch msg.Role {
-		case "user":
-			msgs, err := handleUserMessage(&msg)
-			if err != nil {
-				return nil, fmt.Errorf("handle user message: %w", err)
-			}
-			messages = append(messages, msgs...)
-		case "assistant":
-			msgs, err := handleAssistantMessage(&msg)
-			if err != nil {
-				return nil, fmt.Errorf("handle assistant message: %w", err)
-			}
-			messages = append(messages, msgs...)
-		}
-	}
-
-	openaiReq := &OpenAIRequest{
-		Model:     req.Model,
-		Messages:  messages,
-		MaxTokens: req.MaxTokens,
-		Stream:    req.Stream,
-		Temperature: req.Temperature,
-		TopP:      req.TopP,
-		Stop:      req.StopSequences,
-	}
-
-	// Translate tools
-	if len(req.Tools) > 0 {
-		openaiReq.Tools = translateTools(req.Tools)
-		openaiReq.ToolChoice = translateToolChoice(req.ToolChoice)
-	}
-
-	return openaiReq, nil
+	return CoreToOpenAIRequest(core)
 }
 
 func handleUserMessage(msg *AnthropicMessage) ([]OpenAIMessage, error) {
@@ -341,9 +300,64 @@ func ReverseTranslateRequest(req *OpenAIRequest) (*AnthropicRequest, error) {
 		Temperature:   req.Temperature,
 		TopP:          req.TopP,
 		StopSequences: req.Stop,
+		Tools:         reverseTranslateTools(req.Tools),
+		ToolChoice:    reverseTranslateToolChoice(req.ToolChoice),
 	}
 
 	return anthropicReq, nil
+}
+
+func reverseTranslateTools(tools []OpenAITool) []AnthropicTool {
+	if len(tools) == 0 {
+		return nil
+	}
+	result := make([]AnthropicTool, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type != "" && tool.Type != "function" {
+			continue
+		}
+		if tool.Function.Name == "" {
+			continue
+		}
+		result = append(result, AnthropicTool{
+			Name:        tool.Function.Name,
+			Description: tool.Function.Description,
+			InputSchema: tool.Function.Parameters,
+		})
+	}
+	return result
+}
+
+func reverseTranslateToolChoice(toolChoice interface{}) *AnthropicToolChoice {
+	switch tc := toolChoice.(type) {
+	case string:
+		switch tc {
+		case "auto":
+			return &AnthropicToolChoice{Type: "auto"}
+		case "required":
+			return &AnthropicToolChoice{Type: "any"}
+		case "none", "":
+			return nil
+		}
+	case map[string]interface{}:
+		if tc["type"] != "function" {
+			return nil
+		}
+		fn, ok := tc["function"].(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		name, ok := fn["name"].(string)
+		if !ok || name == "" {
+			return nil
+		}
+		return &AnthropicToolChoice{Type: "tool", Name: name}
+	case map[string]string:
+		if tc["type"] == "function" && tc["name"] != "" {
+			return &AnthropicToolChoice{Type: "tool", Name: tc["name"]}
+		}
+	}
+	return nil
 }
 
 func reverseConvertMessage(msg *OpenAIMessage) *AnthropicMessage {

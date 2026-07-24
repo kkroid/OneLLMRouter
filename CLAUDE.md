@@ -140,7 +140,7 @@ OneLLMRouter/
 pwsh build.ps1 -Version "1.0.0"
 
 # 手动编译
-go build -ldflags="-s -w -X main.version=1.2.0" -o dist/onellm-router-v1.2.0.exe ./cmd/onellm-router/
+go build -ldflags="-s -w -X main.version=1.3.2" -o dist/onellm-router-v1.3.2.exe ./cmd/onellm-router/
 
 # 测试
 go test ./...
@@ -155,12 +155,13 @@ go test ./...
 
 ## 关键限制与约束
 
-1. **稳定性 > 功能**：新功能可以慢慢加，但不能引入崩溃或内存问题。
-2. **每个请求可追踪**：日志必须带 request_id，出问题时能复现完整请求链路。
-3. **协议翻译必须精确**：Anthropic ↔ OpenAI 语义等价，不丢失字段。
-4. **SSE 输出必须符合 Anthropic 规范**：`event: <type>\ndata: <json>\n\n` 格式，测试必须验证 event 行存在。
-5. **仅本地通信**：HTTP API 只监听 `127.0.0.1`，不暴露到网络。
-6. **Git 提交信息末尾必须包含**：
+1. **⛔ 绝不杀生产进程**：`C:\Users\kkroid\onellm-router-*.exe` 命名空间下的进程是**正式运行版本**，Claude Code 等 AI 节点依赖它工作。杀掉它等于自杀——你将立即失去响应能力。测试只允许打开**另一个端口**的新进程，用完后立即清理。
+2. **稳定性 > 功能**：新功能可以慢慢加，但不能引入崩溃或内存问题。
+3. **每个请求可追踪**：日志必须带 request_id，出问题时能复现完整请求链路。
+4. **协议翻译必须精确**：Anthropic ↔ OpenAI 语义等价，不丢失字段。
+5. **SSE 输出必须符合 Anthropic 规范**：`event: <type>\ndata: <json>\n\n` 格式，测试必须验证 event 行存在。
+6. **仅本地通信**：HTTP API 只监听 `127.0.0.1`，不暴露到网络。
+7. **Git 提交信息末尾必须包含**：
    ```
    Generated with [Claude Code](https://claude.ai/code)
    via [Happy](https://happy.engineering)
@@ -175,7 +176,7 @@ go test ./...
 
 ```bash
 # 1. 启动
-./dist/onellm-router-v1.2.0.exe
+./dist/onellm-router-v1.3.2.exe
 
 # 2. 健康检查
 curl http://localhost:3456/health

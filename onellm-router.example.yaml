@@ -14,6 +14,24 @@ log:
 proxy:
   socks5: "127.0.0.1:1082"
 
+codex:
+  # 始终生成 ~/.onellm/model-catalog.json；默认同时覆盖 ~/.codex/model-catalog.json
+  overwrite_catalog: true
+  # 按 provider/ 后的基础模型名匹配；配置优先于上游元数据
+  models:
+    gpt-5.5:
+      default_reasoning_level: medium
+      supported_reasoning_levels: [low, medium, high, xhigh]
+    gpt-5.6-sol:
+      default_reasoning_level: low
+      supported_reasoning_levels: [low, medium, high, xhigh, max, ultra]
+    gpt-5.6-terra:
+      default_reasoning_level: medium
+      supported_reasoning_levels: [low, medium, high, xhigh, max, ultra]
+    gpt-5.6-luna:
+      default_reasoning_level: medium
+      supported_reasoning_levels: [low, medium, high, xhigh, max]
+
 providers:
   - name: "GitHub Copilot"
     prefix: "cp"
@@ -32,6 +50,29 @@ providers:
     models:
       - "deepseek-v4-pro[1m]"
       - "deepseek-v4-flash[1m]"
+
+  # OpenAI Responses API（Codex CLI）— 配置 responses_base_url 即可直通
+  # - name: "OpenAI"
+  #   prefix: "oai"
+  #   responses_base_url: "https://api.openai.com"  # 代码自动追加 /v1/responses
+  #   openai_base_url: "https://api.openai.com"      # 同时支持 chat/completions（可选）
+  #   api_key: "sk-your-openai-key"
+  #   proxy: true            # 走代理访问 OpenAI
+  #   models:
+  #     - "gpt-5"
+  #     - "gpt-5-codex"
+
+  # 78code 中转站（同时支持 Claude + Codex）
+  # - name: "78code"
+  #   prefix: "code78"
+  #   base_url: "https://api.78code.cc/v1"           # Claude Code 用
+  #   responses_base_url: "https://api.78code.cc"    # Codex CLI 用
+  #   api_key: "sk-your-78code-key"
+  #   proxy: true
+  #   models:
+  #     - "claude-fable-5"         # Anthropic + OpenAI 双端点
+  #     - "claude-opus-4-8"        # Anthropic + OpenAI 双端点
+  #     - "gpt-5.6-sol"            # 仅 OpenAI 端点（Codex CLI）
 
   # 添加更多 provider：
   # - name: "My API"

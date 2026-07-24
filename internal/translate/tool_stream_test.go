@@ -2,8 +2,140 @@ package translate
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
+
+func coreToolChunk(index int, id, name, arguments string) *OpenAIStreamChunk {
+	return &OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{
+			Delta: OpenAIStreamDelta{
+				ToolCalls: []OpenAIToolCallDelta{{
+					Index: index,
+					ID:    id,
+					Function: &OpenAIToolFunctionDelta{
+						Name:      name,
+						Arguments: arguments,
+					},
+				}},
+			},
+		}},
+	}
+}
+
+func TestCoreStream_InterleavedToolsEmitOrderedBlocksAtFinish(t *testing.T) {
+	ctx := &StreamContext{
+		MessageID: "msg_interleaved",
+		Model:     "claude-opus-4.8",
+		ToolCalls: make(map[int]*ToolCallState),
+	}
+
+	chunks := []*OpenAIStreamChunk{
+		coreToolChunk(0, "call_0", "Read", `{"path":"a`),
+		coreToolChunk(1, "call_1", "Grep", `{"query":"b"}`),
+		coreToolChunk(0, "", "", `"}`),
+	}
+	for index, chunk := range chunks {
+		events, err := OpenAIStreamChunkToCoreEvents(chunk, ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if strings.HasPrefix(event.Type, "content_block_") {
+				t.Fatalf("chunk %d emitted tool block before finish: %+v", index, events)
+			}
+		}
+	}
+
+	finishReason := "tool_calls"
+	events, err := OpenAIStreamChunkToCoreEvents(&OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{FinishReason: &finishReason}},
+	}, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantTypes := []string{
+		"content_block_start", "content_block_delta", "content_block_stop",
+		"content_block_start", "content_block_delta", "content_block_stop",
+		"message_delta", "message_stop",
+	}
+	if len(events) != len(wantTypes) {
+		t.Fatalf("events = %+v, want types %v", events, wantTypes)
+	}
+	for index, wantType := range wantTypes {
+		if events[index].Type != wantType {
+			t.Fatalf("event %d type = %q, want %q: %+v", index, events[index].Type, wantType, events)
+		}
+	}
+	for _, index := range []int{0, 1, 2} {
+		if events[index].Index != 0 {
+			t.Fatalf("tool 0 event %d index = %d", index, events[index].Index)
+		}
+	}
+	for _, index := range []int{3, 4, 5} {
+		if events[index].Index != 1 {
+			t.Fatalf("tool 1 event %d index = %d", index, events[index].Index)
+		}
+	}
+	if events[1].PartialJSON != `{"path":"a"}` {
+		t.Fatalf("tool 0 args = %q", events[1].PartialJSON)
+	}
+	if events[4].PartialJSON != `{"query":"b"}` {
+		t.Fatalf("tool 1 args = %q", events[4].PartialJSON)
+	}
+}
+
+func TestCoreStream_BuffersArgumentsBeforeName(t *testing.T) {
+	ctx := &StreamContext{
+		MessageID: "msg_delayed_name",
+		Model:     "claude-opus-4.8",
+		ToolCalls: make(map[int]*ToolCallState),
+	}
+
+	first, err := OpenAIStreamChunkToCoreEvents(coreToolChunk(0, "call_0", "", `{"path":"`), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 || first[0].Type != "message_start" {
+		t.Fatalf("unexpected pre-name events: %+v", first)
+	}
+
+	_, err = OpenAIStreamChunkToCoreEvents(coreToolChunk(0, "", "Read", `a"}`), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishReason := "tool_calls"
+	events, err := OpenAIStreamChunkToCoreEvents(&OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{FinishReason: &finishReason}},
+	}, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) < 2 || events[1].PartialJSON != `{"path":"a"}` {
+		t.Fatalf("arguments were not preserved: %+v", events)
+	}
+}
+
+func TestCoreStream_RejectsMissingToolNameAtFinish(t *testing.T) {
+	ctx := &StreamContext{
+		MessageID: "msg_missing_name",
+		Model:     "claude-opus-4.8",
+		ToolCalls: make(map[int]*ToolCallState),
+	}
+
+	_, err := OpenAIStreamChunkToCoreEvents(coreToolChunk(0, "call_0", "", `{}`), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishReason := "tool_calls"
+	_, err = OpenAIStreamChunkToCoreEvents(&OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{FinishReason: &finishReason}},
+	}, ctx)
+	if err == nil || !strings.Contains(err.Error(), "missing tool name") {
+		t.Fatalf("error = %v, want missing tool name", err)
+	}
+}
 
 // TestStreamChunk_SingleToolMultiChunkArgs reproduces the exact bug that caused
 // "Content block not found": a single tool call whose arguments arrive across
@@ -196,5 +328,98 @@ func TestStreamChunk_TwoToolsMultiChunk(t *testing.T) {
 		if !startIndices[idx] {
 			t.Errorf("delta on index %d but no block_start for it", idx)
 		}
+	}
+}
+
+func TestCoreStream_TextDelta(t *testing.T) {
+	ctx := &StreamContext{
+		MessageID: "msg_core",
+		Model:     "claude-opus-4.8",
+		ToolCalls: make(map[int]*ToolCallState),
+	}
+	chunk := &OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{
+			Index: 0,
+			Delta: OpenAIStreamDelta{Content: "hello"},
+		}},
+	}
+
+	events, err := OpenAIStreamChunkToCoreEvents(chunk, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("expected message_start, block_start, delta; got %+v", events)
+	}
+	if events[0].Type != "message_start" || events[0].ID != "msg_core" || events[0].Model != "claude-opus-4.8" {
+		t.Fatalf("message_start mismatch: %+v", events[0])
+	}
+	if events[1].Type != "content_block_start" || events[1].ContentBlock.Type != "text" {
+		t.Fatalf("text block start mismatch: %+v", events[1])
+	}
+	if events[2].Type != "content_block_delta" || events[2].Text != "hello" {
+		t.Fatalf("text delta mismatch: %+v", events[2])
+	}
+}
+
+func TestCoreStream_DelayedToolName(t *testing.T) {
+	ctx := &StreamContext{
+		MessageID: "msg_core",
+		Model:     "claude-opus-4.8",
+		ToolCalls: make(map[int]*ToolCallState),
+	}
+
+	events, err := OpenAIStreamChunkToCoreEvents(&OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{Index: 0, Delta: OpenAIStreamDelta{
+			ToolCalls: []OpenAIToolCallDelta{{Index: 0, ID: "call_1"}},
+		}}},
+	}, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == "content_block_start" {
+			t.Fatalf("should not start tool block before name arrives: %+v", events)
+		}
+	}
+
+	events, err = OpenAIStreamChunkToCoreEvents(&OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{Index: 0, Delta: OpenAIStreamDelta{
+			ToolCalls: []OpenAIToolCallDelta{{
+				Index:    0,
+				Function: &OpenAIToolFunctionDelta{Name: "read", Arguments: `{"path":"a`},
+			}},
+		}}},
+	}, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if strings.HasPrefix(event.Type, "content_block_") {
+			t.Fatalf("tool blocks must wait for finish: %+v", events)
+		}
+	}
+	finishReason := "tool_calls"
+	events, err = OpenAIStreamChunkToCoreEvents(&OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{FinishReason: &finishReason}},
+	}, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var start *CoreStreamEvent
+	var delta *CoreStreamEvent
+	for i := range events {
+		if events[i].Type == "content_block_start" {
+			start = &events[i]
+		}
+		if events[i].Type == "content_block_delta" {
+			delta = &events[i]
+		}
+	}
+	if start == nil || start.ContentBlock.ToolUseID != "call_1" || start.ContentBlock.ToolName != "read" {
+		t.Fatalf("tool start mismatch: %+v", events)
+	}
+	if delta == nil || delta.PartialJSON != `{"path":"a` || delta.Index != start.Index {
+		t.Fatalf("tool delta mismatch: start=%+v delta=%+v", start, delta)
 	}
 }

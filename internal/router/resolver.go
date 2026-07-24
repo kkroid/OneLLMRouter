@@ -1,7 +1,6 @@
 package router
 
 import (
-
 	"strings"
 	"sync"
 )
@@ -76,7 +75,46 @@ func (r *Resolver) Resolve(fullName string) *ResolveResult {
 		}
 	}
 
+	for i := range r.providers {
+		provider := &r.providers[i]
+		for _, separator := range []string{"/", "-"} {
+			prefix := provider.Prefix + separator
+			if !strings.HasPrefix(fullName, prefix) {
+				continue
+			}
+			model := strings.TrimPrefix(fullName, prefix)
+			if model == "" {
+				return nil
+			}
+			if len(provider.Models) == 0 || configuredModel(provider.Models, model) {
+				return &ResolveResult{Provider: provider, Model: model}
+			}
+			return nil
+		}
+	}
+
+	// Bare model name: search configured model lists only.
+	for i := range r.providers {
+		for _, m := range r.providers[i].Models {
+			if m == fullName || strings.TrimSuffix(m, "[1m]") == fullName {
+				return &ResolveResult{
+					Provider: &r.providers[i],
+					Model:    fullName,
+				}
+			}
+		}
+	}
+
 	return nil
+}
+
+func configuredModel(models []string, requested string) bool {
+	for _, model := range models {
+		if model == requested || strings.TrimSuffix(model, "[1m]") == requested {
+			return true
+		}
+	}
+	return false
 }
 
 // canonicalModelName returns the model name to use for the API call.
@@ -131,3 +169,11 @@ func (r *Resolver) Providers() []Provider {
 	return cp
 }
 
+// ModelEntry holds a model with its provider metadata, for model list responses.
+type ModelEntry struct {
+	ID            string         `json:"id"`
+	Object        string         `json:"object"`
+	Created       int64          `json:"created"`
+	OwnedBy       string         `json:"owned_by"`
+	EndpointTypes []EndpointType `json:"supported_endpoint_types"`
+}

@@ -213,9 +213,9 @@ func TestStopReasonMapping(t *testing.T) {
 
 func TestStreamChunk_TextFlow(t *testing.T) {
 	ctx := &StreamContext{
-		MessageID:   "msg_test",
-		Model:       "claude-opus-4.8",
-		ToolCalls:   make(map[int]*ToolCallState),
+		MessageID: "msg_test",
+		Model:     "claude-opus-4.8",
+		ToolCalls: make(map[int]*ToolCallState),
 	}
 
 	// First chunk: message_start
@@ -357,7 +357,19 @@ func TestStreamChunk_ToolCall_DelayedName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Now content_block_start should appear with correct name
+	for _, ev := range events2 {
+		if ev.Type == "content_block_start" {
+			t.Fatalf("tool block must wait for finish: %+v", events2)
+		}
+	}
+	finishReason := "tool_calls"
+	events2, err = TranslateStreamChunk(&OpenAIStreamChunk{
+		Choices: []OpenAIStreamChoice{{FinishReason: &finishReason}},
+	}, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	found := false
 	for _, ev := range events2 {
 		if ev.Type == "content_block_start" {
