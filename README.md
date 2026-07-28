@@ -33,6 +33,8 @@ Claude Code CLI     OpenAI 兼容工具
 | **Anthropic** 模型列表 | `/anthropic/v1/models` | |
 | **OpenAI** | `/openai/v1/chat/completions` | `http://localhost:3456/openai` |
 | **OpenAI** 模型列表 | `/openai/v1/models` | |
+| **OpenAI Responses** | `/openai/v1/responses` | `http://localhost:3456/openai/v1` |
+| **Codex** 模型目录 | `/openai/models` | |
 | 兼容（旧） | `/v1/messages` | `http://localhost:3456` |
 | 健康检查 | `/health` | |
 
@@ -55,6 +57,8 @@ Claude Code CLI     OpenAI 兼容工具
 ## 快速开始
 
 ### 1. 编译
+
+源码构建需要 Go 1.25+ 和 PowerShell 7。
 
 ```bash
 git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter
@@ -168,6 +172,13 @@ curl -X POST http://localhost:3456/openai/v1/chat/completions \
 curl -N -X POST http://localhost:3456/openai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
+
+# --- OpenAI Responses / Codex 格式 ---
+# 将模型名替换为已配置的 Responses provider/model
+
+curl -N -X POST http://localhost:3456/openai/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{"model":"c78/gpt-5.6-sol","input":"hello","stream":true}'
 ```
 
 ## Claude Code 配置
@@ -203,6 +214,26 @@ curl -N -X POST http://localhost:3456/openai/v1/chat/completions \
 }
 ```
 
+## Codex CLI 配置
+
+为 Codex provider 配置 OneLLMRouter 的 Responses 地址，并让 `model_catalog_json` 指向 OneLLMRouter 自动生成的目录文件。下面以 `c78/gpt-5.6-sol` 为例，实际使用时替换为目录中已有的模型：
+
+```toml
+model = "c78/gpt-5.6-sol"
+model_provider = "onellm"
+model_catalog_json = "C:/Users/<you>/.codex/model-catalog.json"
+
+[model_providers.onellm]
+name = "OneLLMRouter"
+base_url = "http://127.0.0.1:3456/openai/v1"
+wire_api = "responses"
+requires_openai_auth = true
+```
+
+启动 OneLLMRouter 后会始终生成 `~/.onellm/model-catalog.json`。默认配置 `codex.overwrite_catalog: true` 还会覆盖 `~/.codex/model-catalog.json`，Codex 的 `/model` 因而可以列出 `provider/model` 形式的模型。设置为 `false` 时只更新 OneLLMRouter 自己的目录文件。
+
+每个 Responses provider 使用 `responses_base_url`，OneLLMRouter 会在请求上游前移除模型 ID 中的 `provider/` 前缀。例如本地选择 `c78/gpt-5.6-sol`，上游收到的模型名是 `gpt-5.6-sol`。
+
 ## CLI 命令
 
 ```bash
@@ -221,11 +252,13 @@ OneLLMRouter/
 ├── cmd/onellm-router/main.go           # CLI 入口
 ├── internal/
 │   ├── auth/                          # GitHub device OAuth + token 管理
+│   ├── catalog/                       # 多 provider 模型发现 + Codex catalog
 │   ├── config/                        # YAML 配置加载
 │   ├── log/                           # slog + 按日滚动
 │   ├── proxy/                         # HTTP 代理 (Copilot + External)
 │   ├── router/                        # Provider 解析 + 模型路由
-│   └── translate/                     # Anthropic ↔ OpenAI 协议翻译
+│   ├── translate/                     # Anthropic ↔ OpenAI 协议翻译
+│   └── ui/                            # Windows 托盘与状态图标
 ├── onellm-router.example.yaml          # 配置模板
 ├── build.ps1                          # 编译脚本
 └── go.mod

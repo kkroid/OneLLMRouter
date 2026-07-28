@@ -116,9 +116,9 @@ OneLLMRouter/
 
 | 约定 | 说明 |
 |------|------|
-| 版本 | Go 1.22+ |
+| 版本 | Go 1.25+ |
 | 模块 | `github.com/kkroid/onellm-router` |
-| CLI 框架 | `cobra` + `viper` |
+| CLI 框架 | `cobra` |
 | 日志 | `log/slog` + 自实现 daily writer（按天切分，保留 30 天，启动时清理过期日志） |
 | 请求 ID | 每个请求生成 UUID v4，通过 `context.Context` 传递 |
 | 错误处理 | `fmt.Errorf("...: %w", err)` 包装错误链，绝不吞错误 |
