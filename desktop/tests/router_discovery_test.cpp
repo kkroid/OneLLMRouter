@@ -18,6 +18,7 @@ private slots:
     void classifiesExternalConflictAndAbsent();
     void redirectIsConflict();
     void configInfoTimeoutReportsFailure();
+    void configInfoTimeoutCanRetryAfterProcessFinishes();
     void overlappingDiscoveryDoesNotCreateSecondProbe();
 };
 
@@ -100,7 +101,7 @@ void RouterDiscoveryTest::classifiesExternalConflictAndAbsent()
     QCOMPARE(classifyHealthProbe(ProbeTransport::ConnectionRefused, {}),
              DiscoveryClassification::Absent);
     QCOMPARE(classifyHealthProbe(ProbeTransport::Unreachable, {}),
-             DiscoveryClassification::Absent);
+             DiscoveryClassification::Conflict);
 }
 
 static QString fixturePath()
@@ -145,6 +146,25 @@ void RouterDiscoveryTest::configInfoTimeoutReportsFailure()
     QSignalSpy failed(&discovery, &RouterDiscovery::configFailed);
     discovery.discover();
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 1000);
+}
+
+void RouterDiscoveryTest::configInfoTimeoutCanRetryAfterProcessFinishes()
+{
+    RouterDiscovery discovery(fixturePath(), "hang", 50);
+    QSignalSpy failed(&discovery, &RouterDiscovery::configFailed);
+    QElapsedTimer elapsed;
+    qint64 firstFailureMs = -1;
+    connect(&discovery, &RouterDiscovery::configFailed, &discovery,
+            [&] {
+                if (firstFailureMs < 0) {
+                    firstFailureMs = elapsed.elapsed();
+                    discovery.discover();
+                }
+            });
+    elapsed.start();
+    discovery.discover();
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 2, 1000);
+    QVERIFY(elapsed.elapsed() - firstFailureMs >= 30);
 }
 
 void RouterDiscoveryTest::overlappingDiscoveryDoesNotCreateSecondProbe()

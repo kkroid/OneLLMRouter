@@ -24,10 +24,22 @@ TrayActionPolicy trayActionPolicy(ProcessOwnership ownership, RouterState state)
 {
     return {
         ownership == ProcessOwnership::None && state == RouterState::Stopped,
-        ownership == ProcessOwnership::Owned,
-        ownership == ProcessOwnership::Owned,
+        ownership == ProcessOwnership::Owned && state != RouterState::Conflict,
+        ownership == ProcessOwnership::Owned && state != RouterState::Conflict,
         ownership == ProcessOwnership::External,
     };
+}
+
+bool shouldAutoStartRouter(ProcessOwnership ownership, bool autoStartAllowed)
+{
+    return ownership == ProcessOwnership::None && autoStartAllowed;
+}
+
+bool healthMatchesOwnedProcess(ProcessOwnership ownership, qint64 processId,
+                               const RouterHealth &health)
+{
+    return ownership == ProcessOwnership::Owned && health.valid &&
+           processId > 0 && health.pid == processId;
 }
 
 QString autoStartCommand(const QString &executable, const QString &configPath)
@@ -72,18 +84,26 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
                     m_process.detachExternal();
                     m_health = {};
                     setState(RouterState::Stopped);
-                } else if (m_process.ownership() == ProcessOwnership::None) {
+                } else if (shouldAutoStartRouter(m_process.ownership(),
+                                                 m_autoStartAllowed)) {
                     startOwned();
                 }
             });
     connect(&m_discovery, &RouterDiscovery::externalRouterFound, this,
             [this](const RouterConfigInfo &config, const RouterHealth &health) {
                 m_config = config;
-                m_health = health;
-                if (m_process.ownership() == ProcessOwnership::None)
+                if (m_process.ownership() == ProcessOwnership::None) {
                     m_process.attachExternal(health);
-                else
+                } else if (m_process.ownership() == ProcessOwnership::External) {
                     m_process.updateHealth(health);
+                } else if (!healthMatchesOwnedProcess(
+                               m_process.ownership(), m_process.processId(), health)) {
+                    setState(RouterState::Conflict);
+                    return;
+                } else {
+                    m_process.updateHealth(health);
+                }
+                m_health = health;
                 setState(RouterState::Healthy);
                 if (!config.proxySocks5.isEmpty()) m_proxyProbe.probe(config.proxySocks5);
             });
@@ -96,6 +116,8 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
             [this](RouterState state) { setState(state); });
     connect(&m_process, &RouterProcess::processStarted, this,
             [this](qint64) { QTimer::singleShot(250, this, &TrayApplication::discover); });
+    connect(&m_process, &RouterProcess::gracefulStopTimedOut, this,
+            [this] { setState(RouterState::Error, QStringLiteral("Graceful stop timed out")); });
     connect(&m_proxyProbe, &ProxyProbe::probeFinished, this,
             [this](const QString &, bool reachable) { m_proxyReachable = reachable; });
     m_pollTimer.setInterval(2000);
@@ -136,7 +158,7 @@ void TrayApplication::rebuildMenu()
     if (policy.restart) connect(m_menu.addAction(m_strings.restart), &QAction::triggered,
                                 &m_process, &RouterProcess::restart);
     if (policy.stop) connect(m_menu.addAction(m_strings.stop), &QAction::triggered,
-                             &m_process, &RouterProcess::requestGracefulStop);
+                             this, &TrayApplication::stopOwned);
     m_menu.addSeparator();
     connect(m_menu.addAction(m_strings.openConfig), &QAction::triggered, this,
             [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(m_configPath)); });
@@ -157,7 +179,13 @@ void TrayApplication::discover() { m_discovery.discover(); }
 
 void TrayApplication::startOwned()
 {
+    m_autoStartAllowed = true;
     if (m_process.startOwned(m_configPath)) setState(RouterState::Starting);
+}
+
+void TrayApplication::stopOwned()
+{
+    if (m_process.requestGracefulStop()) m_autoStartAllowed = false;
 }
 
 void TrayApplication::setState(RouterState state, const QString &detail)

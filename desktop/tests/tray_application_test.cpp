@@ -11,10 +11,14 @@ private slots:
     void quotesAutoStartCommand();
     void usesDedicatedAutoStartValue();
     void externalPolicyHasNoDestructiveActions();
+    void conflictPolicyHasNoDestructiveActions();
+    void explicitStopDisablesAutomaticRestart();
+    void ownedHealthMustMatchChildPid();
     void selectsEnglishAndChineseStrings();
     void rateLimitsIdenticalNotifications();
     void rebuildsMenuWhenAboutToShow();
     void detachedExternalBecomesControllableStoppedState();
+    void loadsEmbeddedStatusIcons();
 };
 
 void TrayApplicationTest::quotesAutoStartCommand()
@@ -40,6 +44,31 @@ void TrayApplicationTest::externalPolicyHasNoDestructiveActions()
     QVERIFY(!policy.start);
     QVERIFY(!policy.stop);
     QVERIFY(!policy.restart);
+}
+
+void TrayApplicationTest::conflictPolicyHasNoDestructiveActions()
+{
+    const TrayActionPolicy policy =
+        trayActionPolicy(ProcessOwnership::Owned, RouterState::Conflict);
+    QVERIFY(!policy.stop);
+    QVERIFY(!policy.restart);
+}
+
+void TrayApplicationTest::explicitStopDisablesAutomaticRestart()
+{
+    QVERIFY(shouldAutoStartRouter(ProcessOwnership::None, true));
+    QVERIFY(!shouldAutoStartRouter(ProcessOwnership::None, false));
+    QVERIFY(!shouldAutoStartRouter(ProcessOwnership::External, true));
+}
+
+void TrayApplicationTest::ownedHealthMustMatchChildPid()
+{
+    RouterHealth health;
+    health.valid = true;
+    health.pid = 42;
+    QVERIFY(healthMatchesOwnedProcess(ProcessOwnership::Owned, 42, health));
+    QVERIFY(!healthMatchesOwnedProcess(ProcessOwnership::Owned, 43, health));
+    QVERIFY(!healthMatchesOwnedProcess(ProcessOwnership::External, 42, health));
 }
 
 void TrayApplicationTest::selectsEnglishAndChineseStrings()
@@ -82,6 +111,13 @@ void TrayApplicationTest::detachedExternalBecomesControllableStoppedState()
     QCOMPARE(process.ownership(), ProcessOwnership::None);
     QVERIFY(!process.health().valid);
     QVERIFY(trayActionPolicy(process.ownership(), RouterState::Stopped).start);
+}
+
+void TrayApplicationTest::loadsEmbeddedStatusIcons()
+{
+    QVERIFY(!QIcon(QStringLiteral(":/icons/green.ico")).isNull());
+    QVERIFY(!QIcon(QStringLiteral(":/icons/yellow.ico")).isNull());
+    QVERIFY(!QIcon(QStringLiteral(":/icons/red.ico")).isNull());
 }
 
 QTEST_MAIN(TrayApplicationTest)

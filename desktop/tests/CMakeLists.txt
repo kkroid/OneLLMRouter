@@ -63,6 +63,7 @@ add_executable(tray_application_test
     ../src/router_discovery.cpp
     ../src/router_process.cpp
     ../src/tray_application.cpp
+    ../assets/icons.qrc
 )
 target_include_directories(tray_application_test PRIVATE ../src)
 target_link_libraries(tray_application_test PRIVATE Qt6::Test Qt6::Widgets Qt6::Network)

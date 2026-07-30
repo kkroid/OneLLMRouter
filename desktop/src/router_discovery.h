@@ -69,6 +69,7 @@ private:
     QTimer m_configTimer;
     int m_timeoutMs;
     bool m_busy = false;
+    bool m_configTimedOut = false;
     quint64 m_generation = 0;
 };
 

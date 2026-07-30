@@ -27,6 +27,7 @@ add_executable(onellm-router-tray WIN32
     src/tray_application.cpp
     src/tray_application.h
     src/i18n.h
+    assets/icons.qrc
 )
 target_link_libraries(onellm-router-tray PRIVATE Qt6::Widgets Qt6::Network)
 target_compile_definitions(onellm-router-tray PRIVATE ONELLM_VERSION="${ONELLM_VERSION}")

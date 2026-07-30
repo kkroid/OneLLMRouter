@@ -142,8 +142,7 @@ DiscoveryClassification classifyHealthProbe(ProbeTransport transport,
         return health.valid ? DiscoveryClassification::External
                             : DiscoveryClassification::Conflict;
     }
-    if (transport == ProbeTransport::ConnectionRefused ||
-        transport == ProbeTransport::Unreachable) {
+    if (transport == ProbeTransport::ConnectionRefused) {
         return DiscoveryClassification::Absent;
     }
     return DiscoveryClassification::Conflict;
@@ -160,10 +159,9 @@ RouterDiscovery::RouterDiscovery(QString coreExecutable, QString configPath,
     m_configTimer.setSingleShot(true);
     connect(&m_configTimer, &QTimer::timeout, this, [this] {
         if (!m_busy || m_configProcess.state() == QProcess::NotRunning) return;
-        m_busy = false;
+        m_configTimedOut = true;
         ++m_generation;
         m_configProcess.kill();
-        emit configFailed(QStringLiteral("config-info timed out"));
     });
     connect(&m_configProcess, &QProcess::errorOccurred, this,
             [this](QProcess::ProcessError error) {
@@ -178,6 +176,12 @@ RouterDiscovery::RouterDiscovery(QString coreExecutable, QString configPath,
             [this](int exitCode, QProcess::ExitStatus exitStatus) {
                 m_configTimer.stop();
                 if (!m_busy) return;
+                if (m_configTimedOut) {
+                    m_configTimedOut = false;
+                    m_busy = false;
+                    emit configFailed(QStringLiteral("config-info timed out"));
+                    return;
+                }
                 if (exitStatus != QProcess::NormalExit || exitCode != 0) {
                     m_busy = false;
                     emit configFailed(
@@ -199,6 +203,7 @@ void RouterDiscovery::discover()
 {
     if (m_busy) return;
     m_busy = true;
+    m_configTimedOut = false;
     ++m_generation;
     m_configProcess.setProgram(m_coreExecutable);
     m_configProcess.setArguments(configInfoArguments(m_configPath));

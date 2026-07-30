@@ -17,6 +17,9 @@ struct TrayActionPolicy {
 };
 
 TrayActionPolicy trayActionPolicy(ProcessOwnership ownership, RouterState state);
+bool shouldAutoStartRouter(ProcessOwnership ownership, bool autoStartAllowed);
+bool healthMatchesOwnedProcess(ProcessOwnership ownership, qint64 processId,
+                               const RouterHealth &health);
 QString autoStartCommand(const QString &executable, const QString &configPath);
 QString autoStartValueName();
 
@@ -39,6 +42,7 @@ private:
     void rebuildMenu();
     void discover();
     void startOwned();
+    void stopOwned();
     void setState(RouterState state, const QString &detail = {});
     QString stateText() const;
     void setAutoStartEnabled(bool enabled);
@@ -57,4 +61,5 @@ private:
     RouterHealth m_health;
     RouterState m_state = RouterState::Stopped;
     bool m_proxyReachable = false;
+    bool m_autoStartAllowed = true;
 };

@@ -4,11 +4,13 @@ Design: a status-colored rounded badge with a white hexagon glyph.
 """
 import math
 import struct
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 
 MASTER_SIZE = 256
 ICON_SIZE = 16
+DESKTOP_ASSET_DIR = Path(__file__).resolve().parents[2] / "desktop" / "assets"
 
 
 def make_bmp_resource(img_16):
@@ -43,7 +45,7 @@ def hexagon_points(cx, cy, r):
     return pts
 
 
-def draw_icon(bg_rgb):
+def draw_master_icon(bg_rgb):
     """Draw a rounded status badge containing a white hexagon."""
     img = Image.new("RGBA", (MASTER_SIZE, MASTER_SIZE), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -58,16 +60,25 @@ def draw_icon(bg_rgb):
     pts_int = [(round(x), round(y)) for x, y in pts]
     d.polygon(pts_int, fill=(255, 255, 255, 255))
 
-    return img.resize((ICON_SIZE, ICON_SIZE), Image.Resampling.LANCZOS)
+    return img
 
 
 for color, name in [((0x2E, 0x8B, 0x57), "green"),
                     ((0xE0, 0xA0, 0x00), "yellow"),
                     ((0xC0, 0x39, 0x2B), "red")]:
-    img = draw_icon(color)
-    data = make_bmp_resource(img)
+    master = draw_master_icon(color)
+    img_16 = master.resize((ICON_SIZE, ICON_SIZE), Image.Resampling.LANCZOS)
+    data = make_bmp_resource(img_16)
     path = f"{name}.bin"
     with open(path, "wb") as f:
         f.write(data)
     print(f"  {path} saved ({len(data)} bytes)")
+    DESKTOP_ASSET_DIR.mkdir(parents=True, exist_ok=True)
+    ico_path = DESKTOP_ASSET_DIR / f"{name}.ico"
+    master.save(
+        ico_path,
+        format="ICO",
+        sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (256, 256)],
+    )
+    print(f"  {ico_path} saved")
 print("done")
