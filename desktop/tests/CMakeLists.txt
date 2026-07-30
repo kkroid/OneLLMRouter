@@ -51,3 +51,32 @@ add_test(NAME proxy_probe_test COMMAND proxy_probe_test)
 set_tests_properties(proxy_probe_test PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
+
+add_executable(tray_application_test
+    tray_application_test.cpp
+    ../src/proxy_probe.cpp
+    ../src/router_discovery.cpp
+    ../src/router_process.cpp
+    ../src/tray_application.cpp
+)
+target_include_directories(tray_application_test PRIVATE ../src)
+target_link_libraries(tray_application_test PRIVATE Qt6::Test Qt6::Widgets Qt6::Network)
+target_compile_definitions(tray_application_test PRIVATE ONELLM_VERSION="${ONELLM_VERSION}")
+add_test(NAME tray_application_test COMMAND tray_application_test)
+set_tests_properties(tray_application_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_executable(smoke_mode_test
+    smoke_mode_test.cpp
+    ../src/smoke_mode.cpp
+    ../src/router_discovery.cpp
+    ../src/router_process.cpp
+)
+target_include_directories(smoke_mode_test PRIVATE ../src)
+target_link_libraries(smoke_mode_test PRIVATE Qt6::Test Qt6::Network)
+add_test(NAME smoke_mode_test COMMAND smoke_mode_test)
+set_tests_properties(smoke_mode_test PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
