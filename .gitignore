@@ -25,5 +25,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.worktrees/
 v1.1.0-plan.md
 onellm-router.exe
