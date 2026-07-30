@@ -34,6 +34,7 @@ var (
 	cfgFile   string
 	daemon    bool
 	noPidLock bool
+	trayChild bool
 	version   string // set via ldflags: -X main.version=1.0.0
 )
 
@@ -55,19 +56,30 @@ func configPath() string {
 }
 
 func main() {
+	rootCmd := newRootCmd()
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func newRootCmd() *cobra.Command {
+	serve := serveCmd()
 	rootCmd := &cobra.Command{
 		Use:   "onellm-router",
 		Short: "OneLLMRouter — AI model proxy gateway",
 		Long: `OneLLMRouter unifies GitHub Copilot Claude models and arbitrary
 Anthropic-compatible APIs behind standard Anthropic + OpenAI API endpoints.`,
 		Version: version,
-		RunE:    serveCmd().RunE,
+		RunE:    serve.RunE,
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file path (default: onellm-router.yaml next to exe)")
 	rootCmd.PersistentFlags().BoolVarP(&daemon, "daemon", "d", false, "run in background")
 	rootCmd.PersistentFlags().BoolVar(&noPidLock, "no-pid", false, "allow multiple instances (skip PID lock)")
+	rootCmd.PersistentFlags().BoolVar(&trayChild, "tray-child", false, "run as a desktop tray child")
 
+	rootCmd.AddCommand(serve)
 	rootCmd.AddCommand(statusCmd())
 	rootCmd.AddCommand(configInfoCmd())
 	rootCmd.AddCommand(&cobra.Command{
@@ -77,10 +89,7 @@ Anthropic-compatible APIs behind standard Anthropic + OpenAI API endpoints.`,
 	rootCmd.AddCommand(installCmd())
 	rootCmd.AddCommand(uninstallCmd())
 
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
 func serveCmd() *cobra.Command {
@@ -168,7 +177,7 @@ func serveCmd() *cobra.Command {
 
 			printClaudeCodeSettings(cfg)
 
-			if daemon {
+			if shouldDetachFromTerminal(daemon, trayChild) {
 				detachFromTerminal()
 			}
 
@@ -197,7 +206,11 @@ func serveCmd() *cobra.Command {
 			once := new(sync.Once)
 			stop := func() { once.Do(func() { close(doneCh) }) }
 
-			go ui.NewTray(cfg.Server.HTTPPort, version, nil, stop).Run()
+			if shouldStartNativeTray(trayChild) {
+				go ui.NewTray(cfg.Server.HTTPPort, version, nil, stop).Run()
+			} else {
+				go watchTrayControl(os.Stdin, stop)
+			}
 
 			go func() {
 				sigCh := make(chan os.Signal, 1)
