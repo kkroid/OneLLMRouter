@@ -17,3 +17,15 @@ add_test(NAME router_discovery_test COMMAND router_discovery_test)
 set_tests_properties(router_discovery_test PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
+
+add_executable(router_process_test
+    router_process_test.cpp
+    ../src/router_process.cpp
+    ../src/router_process.h
+)
+target_include_directories(router_process_test PRIVATE ../src)
+target_link_libraries(router_process_test PRIVATE Qt6::Test Qt6::Network)
+add_test(NAME router_process_test COMMAND router_process_test)
+set_tests_properties(router_process_test PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
