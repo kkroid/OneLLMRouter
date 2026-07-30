@@ -41,7 +41,7 @@ Claude Code CLI              OpenAI 兼容工具
 
 | 层 | 语言 | 框架/库 | 说明 |
 |----|------|---------|------|
-| 守护进程 | **Go** 1.22+ | cobra, net/http, slog | 代理核心 + API 路由 + 协议翻译 |
+| 守护进程 | **Go** 1.25+ | cobra, net/http, slog | 代理核心 + API 路由 + 协议翻译 |
 
 ### 为什么 Go？
 
@@ -150,6 +150,13 @@ go test ./...
 
 - `onellm-router.yaml`：完整配置（端口、日志、代理、provider、model slots）— gitignore
 - `onellm-router.example.yaml`：配置模板（提交到 git）
+
+### 内部桌面契约
+
+- `onellm-router --config <path> config-info --json`：加载并校验配置，只输出桌面发现所需的非敏感 JSON。
+- `onellm-router serve --tray-child --config <path>`：桌面托盘拥有的 core 子进程模式；不 detach、不启动原生托盘，stdin 仅接受独立的 `shutdown` 行。
+- `--tray-child` 是内部集成标志，不替代用户直接运行时使用的 `--daemon`。
+- `/health` 只读取本地运行状态，不得为健康检查访问上游。
 
 ---
 

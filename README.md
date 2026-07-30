@@ -238,12 +238,25 @@ requires_openai_auth = true
 
 ```bash
 onellm-router                # 启动守护进程（无 token 自动引导登录）
+onellm-router serve          # 显式启动守护进程
 onellm-router --daemon       # 后台运行
 onellm-router status         # 检查运行状态
 onellm-router install        # 注册开机自启
 onellm-router uninstall      # 取消开机自启
 onellm-router version        # 查看版本
 ```
+
+### 内部桌面契约
+
+桌面托盘通过以下只读命令加载并校验配置，输出不会包含 API key 或 provider secret：
+
+```bash
+onellm-router --config <path> config-info --json
+```
+
+JSON 固定包含 `service`、绝对 `config_path`、`host`、`http_port`、`log_dir`、`proxy_socks5`、`bell`、`onellm_catalog_path` 和 `codex_catalog_path`。`/health` 提供 `service`、`pid`、版本、端口、模型数、Copilot token 状态和代理地址，且不会为健康检查访问上游。
+
+桌面父进程使用 `onellm-router serve --tray-child --config <path>` 启动自己拥有的 core 子进程。此内部标志会保留 stdin、禁用原生托盘，并只在 stdin 收到独立的 `shutdown` 行时优雅退出；它不是 `--daemon` 的通用替代。
 
 ## 项目结构
 
