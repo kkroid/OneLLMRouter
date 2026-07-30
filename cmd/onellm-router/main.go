@@ -69,6 +69,7 @@ Anthropic-compatible APIs behind standard Anthropic + OpenAI API endpoints.`,
 	rootCmd.PersistentFlags().BoolVar(&noPidLock, "no-pid", false, "allow multiple instances (skip PID lock)")
 
 	rootCmd.AddCommand(statusCmd())
+	rootCmd.AddCommand(configInfoCmd())
 	rootCmd.AddCommand(&cobra.Command{
 		Use: "version", Short: "Print version",
 		Run: func(cmd *cobra.Command, args []string) { fmt.Println(version) },
