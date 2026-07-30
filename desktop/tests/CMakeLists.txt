@@ -29,3 +29,13 @@ add_test(NAME router_process_test COMMAND router_process_test)
 set_tests_properties(router_process_test PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
+
+add_executable(version_contract_test version_contract_test.cpp)
+target_link_libraries(version_contract_test PRIVATE Qt6::Test)
+target_compile_definitions(version_contract_test PRIVATE
+    ONELLM_VERSION="${ONELLM_VERSION}"
+)
+add_test(NAME version_contract_test COMMAND version_contract_test)
+set_tests_properties(version_contract_test PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)

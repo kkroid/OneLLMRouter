@@ -19,7 +19,7 @@ add_executable(onellm-router-tray WIN32
     src/router_types.h
 )
 target_link_libraries(onellm-router-tray PRIVATE Qt6::Widgets Qt6::Network)
-target_compile_definitions(onellm-router-tray PRIVATE ONELLM_VERSION="\${ONELLM_VERSION}")
+target_compile_definitions(onellm-router-tray PRIVATE ONELLM_VERSION="${ONELLM_VERSION}")
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
