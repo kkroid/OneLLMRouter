@@ -150,22 +150,36 @@ DiscoveryClassification classifyHealthProbe(ProbeTransport transport,
 }
 
 RouterDiscovery::RouterDiscovery(QString coreExecutable, QString configPath,
-                                 QObject *parent)
+                                 int timeoutMs, QObject *parent)
     : QObject(parent),
       m_coreExecutable(std::move(coreExecutable)),
       m_configPath(std::move(configPath)),
-      m_network(new QNetworkAccessManager(this))
+      m_network(new QNetworkAccessManager(this)),
+      m_timeoutMs(timeoutMs)
 {
+    m_configTimer.setSingleShot(true);
+    connect(&m_configTimer, &QTimer::timeout, this, [this] {
+        if (!m_busy || m_configProcess.state() == QProcess::NotRunning) return;
+        m_busy = false;
+        ++m_generation;
+        m_configProcess.kill();
+        emit configFailed(QStringLiteral("config-info timed out"));
+    });
     connect(&m_configProcess, &QProcess::errorOccurred, this,
             [this](QProcess::ProcessError error) {
                 if (error == QProcess::FailedToStart) {
+                    m_configTimer.stop();
+                    m_busy = false;
                     emit configFailed(m_configProcess.errorString());
                 }
             });
     connect(&m_configProcess,
             qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
             [this](int exitCode, QProcess::ExitStatus exitStatus) {
+                m_configTimer.stop();
+                if (!m_busy) return;
                 if (exitStatus != QProcess::NormalExit || exitCode != 0) {
+                    m_busy = false;
                     emit configFailed(
                         QString::fromLocal8Bit(m_configProcess.readAllStandardError()));
                     return;
@@ -173,19 +187,19 @@ RouterDiscovery::RouterDiscovery(QString coreExecutable, QString configPath,
                 const RouterConfigInfo config =
                     parseRouterConfigInfo(m_configProcess.readAllStandardOutput());
                 if (!config.valid || !isLoopbackHost(config.host)) {
+                    m_busy = false;
                     emit configFailed(QStringLiteral("Invalid config-info response"));
                     return;
                 }
-                probeHealth(config);
+                probeHealth(config, m_generation);
             });
 }
 
 void RouterDiscovery::discover()
 {
-    if (m_configProcess.state() != QProcess::NotRunning) {
-        emit configFailed(QStringLiteral("Configuration discovery already running"));
-        return;
-    }
+    if (m_busy) return;
+    m_busy = true;
+    ++m_generation;
     m_configProcess.setProgram(m_coreExecutable);
     m_configProcess.setArguments(configInfoArguments(m_configPath));
     m_configProcess.setWorkingDirectory(QFileInfo(m_coreExecutable).absolutePath());
@@ -196,9 +210,11 @@ void RouterDiscovery::discover()
         });
 #endif
     m_configProcess.start();
+    m_configTimer.start(m_timeoutMs);
 }
 
-void RouterDiscovery::probeHealth(const RouterConfigInfo &config)
+void RouterDiscovery::probeHealth(const RouterConfigInfo &config,
+                                  quint64 generation)
 {
     QUrl url;
     url.setScheme(QStringLiteral("http"));
@@ -207,15 +223,29 @@ void RouterDiscovery::probeHealth(const RouterConfigInfo &config)
     url.setPath(QStringLiteral("/health"));
 
     QNetworkRequest request(url);
-    request.setTransferTimeout(2000);
+    request.setTransferTimeout(m_timeoutMs);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::ManualRedirectPolicy);
     QNetworkReply *reply = m_network->get(request);
     connect(reply, &QNetworkReply::finished, this,
-            [this, config, reply] { finishProbe(config, reply); });
+            [this, config, reply, generation] {
+                finishProbe(config, reply, generation);
+            });
 }
 
 void RouterDiscovery::finishProbe(const RouterConfigInfo &config,
-                                  QNetworkReply *reply)
+                                  QNetworkReply *reply, quint64 generation)
 {
+    if (!m_busy || generation != m_generation) {
+        reply->deleteLater();
+        return;
+    }
+    m_busy = false;
+    if (reply->attribute(QNetworkRequest::RedirectionTargetAttribute).isValid()) {
+        emit portConflict(config, QStringLiteral("Health endpoint redirected"));
+        reply->deleteLater();
+        return;
+    }
     const ProbeTransport transport = probeTransport(reply);
     RouterHealth health;
     if (transport == ProbeTransport::HttpResponse &&
@@ -233,7 +263,7 @@ void RouterDiscovery::finishProbe(const RouterConfigInfo &config,
     } else if (classification == DiscoveryClassification::Absent) {
         emit routerAbsent(config);
     } else {
-        emit portConflict(config, reply->errorString());
+        emit portConflict(config, QStringLiteral("Invalid router health identity"));
     }
     reply->deleteLater();
 }

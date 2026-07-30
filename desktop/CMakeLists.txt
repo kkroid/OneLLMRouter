@@ -8,7 +8,10 @@ set(CMAKE_AUTORCC ON)
 set(ONELLM_VERSION "1.4.0" CACHE STRING "OneLLMRouter release version")
 
 include(CTest)
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network Test)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+endif()
 
 add_executable(onellm-router-tray WIN32
     src/main.cpp

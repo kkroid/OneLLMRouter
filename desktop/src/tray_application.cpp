@@ -57,7 +57,7 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
     : QObject(parent),
       m_configPath(QFileInfo(configPath).absoluteFilePath()),
       m_strings(stringsForLocale(QLocale::system())),
-      m_discovery(corePath(), m_configPath, this),
+      m_discovery(corePath(), m_configPath, 2000, this),
       m_process(this),
       m_proxyProbe(this)
 {
@@ -68,7 +68,13 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
     connect(&m_discovery, &RouterDiscovery::routerAbsent, this,
             [this](const RouterConfigInfo &config) {
                 m_config = config;
-                if (m_process.ownership() == ProcessOwnership::None) startOwned();
+                if (m_process.ownership() == ProcessOwnership::External) {
+                    m_process.detachExternal();
+                    m_health = {};
+                    setState(RouterState::Stopped);
+                } else if (m_process.ownership() == ProcessOwnership::None) {
+                    startOwned();
+                }
             });
     connect(&m_discovery, &RouterDiscovery::externalRouterFound, this,
             [this](const RouterConfigInfo &config, const RouterHealth &health) {
@@ -110,7 +116,10 @@ void TrayApplication::rebuildMenu()
         QAction *action = m_menu.addAction(text);
         action->setEnabled(false);
     };
-    disabled(QString("OneLLMRouter %1 - %2").arg(ONELLM_VERSION, stateText()));
+    disabled(QString("OneLLMRouter %1 - %2")
+                 .arg(m_health.version.isEmpty() ? QString(ONELLM_VERSION)
+                                                 : m_health.version,
+                      stateText()));
     disabled(m_strings.modelsPort.arg(m_health.models)
                  .arg(m_config.port ? m_config.port : m_health.port));
     disabled(m_strings.proxy.arg(m_config.proxySocks5.isEmpty() ? "-" : m_config.proxySocks5,

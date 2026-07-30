@@ -14,6 +14,7 @@ private slots:
     void selectsEnglishAndChineseStrings();
     void rateLimitsIdenticalNotifications();
     void rebuildsMenuWhenAboutToShow();
+    void detachedExternalBecomesControllableStoppedState();
 };
 
 void TrayApplicationTest::quotesAutoStartCommand()
@@ -69,6 +70,18 @@ void TrayApplicationTest::rebuildsMenuWhenAboutToShow()
         foundStart = foundStart || action->objectName() == "startRouter";
     }
     QVERIFY(foundStart);
+}
+
+void TrayApplicationTest::detachedExternalBecomesControllableStoppedState()
+{
+    RouterProcess process;
+    RouterHealth health;
+    health.valid = true;
+    QVERIFY(process.attachExternal(health));
+    QVERIFY(process.detachExternal());
+    QCOMPARE(process.ownership(), ProcessOwnership::None);
+    QVERIFY(!process.health().valid);
+    QVERIFY(trayActionPolicy(process.ownership(), RouterState::Stopped).start);
 }
 
 QTEST_MAIN(TrayApplicationTest)

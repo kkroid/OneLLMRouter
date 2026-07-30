@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QTcpServer>
 
 #include "proxy_probe.h"
 
@@ -11,6 +12,8 @@ private slots:
     void parsesLoopbackEndpoints();
     void rejectsInvalidOrRemoteEndpoints_data();
     void rejectsInvalidOrRemoteEndpoints();
+    void reportsReachableOnDynamicLoopbackListener();
+    void reportsUnreachableAfterDynamicListenerCloses();
 };
 
 void ProxyProbeTest::parsesLoopbackEndpoints_data()
@@ -55,5 +58,40 @@ void ProxyProbeTest::rejectsInvalidOrRemoteEndpoints()
     QVERIFY(!parseProxyEndpoint(address).has_value());
 }
 
-QTEST_APPLESS_MAIN(ProxyProbeTest)
+static quint16 dynamicProxyPort(QTcpServer &server)
+{
+    while (server.listen(QHostAddress::LocalHost, 0)) {
+        const quint16 port = server.serverPort();
+        if (port != 3456 && port != 3457) return port;
+        server.close();
+    }
+    return 0;
+}
+
+void ProxyProbeTest::reportsReachableOnDynamicLoopbackListener()
+{
+    QTcpServer server;
+    const quint16 port = dynamicProxyPort(server);
+    QVERIFY(port != 0);
+    ProxyProbe probe;
+    QSignalSpy finished(&probe, &ProxyProbe::probeFinished);
+    probe.probe(QString("127.0.0.1:%1").arg(port));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, 1000);
+    QVERIFY(finished.takeFirst().at(1).toBool());
+}
+
+void ProxyProbeTest::reportsUnreachableAfterDynamicListenerCloses()
+{
+    QTcpServer server;
+    const quint16 port = dynamicProxyPort(server);
+    QVERIFY(port != 0);
+    server.close();
+    ProxyProbe probe;
+    QSignalSpy finished(&probe, &ProxyProbe::probeFinished);
+    probe.probe(QString("127.0.0.1:%1").arg(port));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, 1000);
+    QVERIFY(!finished.takeFirst().at(1).toBool());
+}
+
+QTEST_GUILESS_MAIN(ProxyProbeTest)
 #include "proxy_probe_test.moc"

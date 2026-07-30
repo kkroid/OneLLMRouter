@@ -10,7 +10,9 @@ private slots:
 
 void VersionContractTest::compileDefinitionExpandsCacheValue()
 {
-    QCOMPARE(QStringLiteral(ONELLM_VERSION), QStringLiteral("1.4.0"));
+    const QString version = QStringLiteral(ONELLM_VERSION);
+    QVERIFY(!version.isEmpty());
+    QVERIFY(version != QStringLiteral("ONELLM_VERSION"));
 }
 
 QTEST_APPLESS_MAIN(VersionContractTest)

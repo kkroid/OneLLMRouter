@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QProcess>
 #include <QStringList>
+#include <QTimer>
 
 struct RouterConfigInfo {
     bool valid = false;
@@ -46,7 +47,7 @@ class RouterDiscovery : public QObject
 
 public:
     explicit RouterDiscovery(QString coreExecutable, QString configPath,
-                             QObject *parent = nullptr);
+                             int timeoutMs = 2000, QObject *parent = nullptr);
     void discover();
 
 signals:
@@ -57,13 +58,18 @@ signals:
     void portConflict(const RouterConfigInfo &config, const QString &message);
 
 private:
-    void probeHealth(const RouterConfigInfo &config);
-    void finishProbe(const RouterConfigInfo &config, QNetworkReply *reply);
+    void probeHealth(const RouterConfigInfo &config, quint64 generation);
+    void finishProbe(const RouterConfigInfo &config, QNetworkReply *reply,
+                     quint64 generation);
 
     QString m_coreExecutable;
     QString m_configPath;
     QProcess m_configProcess;
     QNetworkAccessManager *m_network;
+    QTimer m_configTimer;
+    int m_timeoutMs;
+    bool m_busy = false;
+    quint64 m_generation = 0;
 };
 
 Q_DECLARE_METATYPE(RouterConfigInfo)

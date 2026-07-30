@@ -11,6 +11,9 @@ private slots:
     void usesNarrowShutdownProtocol();
     void externalInstanceIsReadOnlyAndCreatesNoProcess();
     void absentInstanceCannotBeControlled();
+    void startFailureNeverBecomesOwned();
+    void restartStartsOnlyAfterFinished();
+    void stopTimeoutDoesNotForceTermination();
 };
 
 void RouterProcessTest::usesExplicitTrayChildArguments()
@@ -47,5 +50,48 @@ void RouterProcessTest::absentInstanceCannotBeControlled()
     QVERIFY(!process.restart());
 }
 
-QTEST_APPLESS_MAIN(RouterProcessTest)
+static QString processFixturePath()
+{
+    return QDir(QCoreApplication::applicationDirPath())
+        .filePath("test_core_fixture.exe");
+}
+
+void RouterProcessTest::startFailureNeverBecomesOwned()
+{
+    RouterProcess process("C:/missing/onellm-router-core.exe", 50);
+    QSignalSpy error(&process, &RouterProcess::processError);
+    QVERIFY(process.startOwned("C:/tmp/config"));
+    QTRY_COMPARE_WITH_TIMEOUT(error.count(), 1, 1000);
+    QCOMPARE(process.ownership(), ProcessOwnership::None);
+}
+
+void RouterProcessTest::restartStartsOnlyAfterFinished()
+{
+    RouterProcess process(processFixturePath(), 1000);
+    QSignalSpy started(&process, &RouterProcess::processStarted);
+    QSignalSpy finished(&process, &RouterProcess::processFinished);
+    QVERIFY(process.startOwned("C:/tmp/normal"));
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, 1000);
+    QVERIFY(process.restart());
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, 1000);
+    QVERIFY(process.requestGracefulStop());
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, 1000);
+}
+
+void RouterProcessTest::stopTimeoutDoesNotForceTermination()
+{
+    RouterProcess process(processFixturePath(), 30);
+    QSignalSpy started(&process, &RouterProcess::processStarted);
+    QSignalSpy timeout(&process, &RouterProcess::gracefulStopTimedOut);
+    QSignalSpy finished(&process, &RouterProcess::processFinished);
+    QVERIFY(process.startOwned("C:/tmp/slow"));
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, 1000);
+    QVERIFY(process.requestGracefulStop());
+    QTRY_COMPARE_WITH_TIMEOUT(timeout.count(), 1, 500);
+    QCOMPARE(finished.count(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, 1000);
+}
+
+QTEST_GUILESS_MAIN(RouterProcessTest)
 #include "router_process_test.moc"

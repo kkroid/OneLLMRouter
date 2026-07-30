@@ -19,10 +19,17 @@ QByteArray gracefulShutdownCommand()
 }
 
 RouterProcess::RouterProcess(QObject *parent)
+    : RouterProcess(QString(), 30000, parent)
+{
+}
+
+RouterProcess::RouterProcess(QString coreExecutable, int stopTimeoutMs,
+                             QObject *parent)
     : QObject(parent)
 {
     m_stopTimer.setSingleShot(true);
-    m_stopTimer.setInterval(30000);
+    m_stopTimer.setInterval(stopTimeoutMs);
+    m_coreExecutable = std::move(coreExecutable);
     connect(&m_stopTimer, &QTimer::timeout, this,
             &RouterProcess::gracefulStopTimedOut);
 }
@@ -108,8 +115,10 @@ bool RouterProcess::startOwned(const QString &configPath)
         return false;
     }
 
-    m_coreExecutable = QDir(QCoreApplication::applicationDirPath())
-                           .filePath(QStringLiteral("onellm-router-core.exe"));
+    if (m_coreExecutable.isEmpty()) {
+        m_coreExecutable = QDir(QCoreApplication::applicationDirPath())
+                               .filePath(QStringLiteral("onellm-router-core.exe"));
+    }
     m_configPath = QFileInfo(configPath).absoluteFilePath();
     QProcess *process = ensureProcess();
     process->setProgram(m_coreExecutable);
@@ -156,6 +165,16 @@ bool RouterProcess::restart()
     return true;
 }
 
+bool RouterProcess::detachExternal()
+{
+    if (m_ownership != ProcessOwnership::External) return false;
+    m_ownership = ProcessOwnership::None;
+    m_health = {};
+    emit ownershipChanged(m_ownership);
+    emit stateChanged(RouterState::Stopped);
+    return true;
+}
+
 void RouterProcess::updateHealth(const RouterHealth &health)
 {
     if (!health.valid || m_ownership == ProcessOwnership::None) {
@@ -170,6 +189,7 @@ void RouterProcess::handleFinished(int exitCode,
 {
     m_stopTimer.stop();
     m_startPending = false;
+    m_health = {};
     if (m_ownership == ProcessOwnership::Owned) {
         m_ownership = ProcessOwnership::None;
         emit ownershipChanged(m_ownership);

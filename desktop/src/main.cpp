@@ -23,6 +23,7 @@ int main(int argc, char *argv[])
                                         ".onellm/onellm-router.yaml"));
     QCommandLineOption smokeOption("smoke-test", "Write smoke result JSON.",
                                    "result-json");
+    smokeOption.setFlags(QCommandLineOption::HiddenFromHelp);
     parser.addOption(configOption);
     parser.addOption(smokeOption);
     parser.process(application);

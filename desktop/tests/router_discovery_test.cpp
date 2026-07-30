@@ -1,4 +1,6 @@
 #include <QtTest>
+#include <QTcpServer>
+#include <QTcpSocket>
 
 #include "router_discovery.h"
 
@@ -14,6 +16,9 @@ private slots:
     void parsesExpectedRouterHealth();
     void rejectsWrongHealthIdentity();
     void classifiesExternalConflictAndAbsent();
+    void redirectIsConflict();
+    void configInfoTimeoutReportsFailure();
+    void overlappingDiscoveryDoesNotCreateSecondProbe();
 };
 
 void RouterDiscoveryTest::buildsConfigInfoArgumentsWithoutShell()
@@ -98,5 +103,79 @@ void RouterDiscoveryTest::classifiesExternalConflictAndAbsent()
              DiscoveryClassification::Absent);
 }
 
-QTEST_APPLESS_MAIN(RouterDiscoveryTest)
+static QString fixturePath()
+{
+    return QDir(QCoreApplication::applicationDirPath())
+        .filePath("test_core_fixture.exe");
+}
+
+static quint16 safeDynamicPort(QTcpServer &server)
+{
+    while (server.listen(QHostAddress::LocalHost, 0)) {
+        const quint16 port = server.serverPort();
+        if (port != 3456 && port != 3457) return port;
+        server.close();
+    }
+    return 0;
+}
+
+void RouterDiscoveryTest::redirectIsConflict()
+{
+    QTcpServer server;
+    const quint16 port = safeDynamicPort(server);
+    QVERIFY(port != 0);
+    connect(&server, &QTcpServer::newConnection, &server, [&server] {
+        QTcpSocket *socket = server.nextPendingConnection();
+        connect(socket, &QTcpSocket::readyRead, socket, [socket] {
+            socket->readAll();
+            socket->write("HTTP/1.1 302 Found\r\nLocation: http://example.com/\r\n"
+                          "Content-Length: 0\r\nConnection: close\r\n\r\n");
+            socket->disconnectFromHost();
+        });
+    });
+    RouterDiscovery discovery(fixturePath(), QString::number(port), 1000);
+    QSignalSpy conflict(&discovery, &RouterDiscovery::portConflict);
+    discovery.discover();
+    QTRY_COMPARE_WITH_TIMEOUT(conflict.count(), 1, 3000);
+}
+
+void RouterDiscoveryTest::configInfoTimeoutReportsFailure()
+{
+    RouterDiscovery discovery(fixturePath(), "hang", 50);
+    QSignalSpy failed(&discovery, &RouterDiscovery::configFailed);
+    discovery.discover();
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 1000);
+}
+
+void RouterDiscoveryTest::overlappingDiscoveryDoesNotCreateSecondProbe()
+{
+    QTcpServer server;
+    const quint16 port = safeDynamicPort(server);
+    QVERIFY(port != 0);
+    int requests = 0;
+    connect(&server, &QTcpServer::newConnection, &server, [&] {
+        ++requests;
+        QTcpSocket *socket = server.nextPendingConnection();
+        connect(socket, &QTcpSocket::readyRead, socket, [socket, port] {
+            socket->readAll();
+            const QByteArray body = QString(
+                R"({"status":"ok","service":"onellm-router","pid":1,"version":"1.4.0","http_port":%1,"models":0,"copilot_token":false})")
+                                        .arg(port).toUtf8();
+            QTimer::singleShot(100, socket, [socket, body] {
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              "Content-Length: " + QByteArray::number(body.size()) +
+                              "\r\nConnection: close\r\n\r\n" + body);
+                socket->disconnectFromHost();
+            });
+        });
+    });
+    RouterDiscovery discovery(fixturePath(), QString::number(port), 1000);
+    QSignalSpy external(&discovery, &RouterDiscovery::externalRouterFound);
+    discovery.discover();
+    discovery.discover();
+    QTRY_COMPARE_WITH_TIMEOUT(external.count(), 1, 3000);
+    QCOMPARE(requests, 1);
+}
+
+QTEST_GUILESS_MAIN(RouterDiscoveryTest)
 #include "router_discovery_test.moc"

@@ -30,7 +30,7 @@ SmokeRunner::SmokeRunner(QString configPath, QString resultPath,
     : QObject(parent),
       m_configPath(QFileInfo(configPath).absoluteFilePath()),
       m_resultPath(QFileInfo(resultPath).absoluteFilePath()),
-      m_discovery(corePath(), m_configPath, this),
+      m_discovery(corePath(), m_configPath, 2000, this),
       m_process(this)
 {
     m_startTimer.setSingleShot(true);

@@ -1,3 +1,6 @@
+add_executable(test_core_fixture test_core_fixture.cpp)
+target_link_libraries(test_core_fixture PRIVATE Qt6::Core)
+
 add_executable(router_types_test router_types_test.cpp)
 target_include_directories(router_types_test PRIVATE ../src)
 target_link_libraries(router_types_test PRIVATE Qt6::Test)
@@ -13,6 +16,7 @@ add_executable(router_discovery_test
 )
 target_include_directories(router_discovery_test PRIVATE ../src)
 target_link_libraries(router_discovery_test PRIVATE Qt6::Test Qt6::Network)
+add_dependencies(router_discovery_test test_core_fixture)
 add_test(NAME router_discovery_test COMMAND router_discovery_test)
 set_tests_properties(router_discovery_test PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
@@ -25,6 +29,7 @@ add_executable(router_process_test
 )
 target_include_directories(router_process_test PRIVATE ../src)
 target_link_libraries(router_process_test PRIVATE Qt6::Test Qt6::Network)
+add_dependencies(router_process_test test_core_fixture)
 add_test(NAME router_process_test COMMAND router_process_test)
 set_tests_properties(router_process_test PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"

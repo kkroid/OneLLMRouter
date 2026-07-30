@@ -17,6 +17,8 @@ class RouterProcess : public QObject
 
 public:
     explicit RouterProcess(QObject *parent = nullptr);
+    RouterProcess(QString coreExecutable, int stopTimeoutMs,
+                  QObject *parent = nullptr);
     ~RouterProcess() override;
 
     ProcessOwnership ownership() const;
@@ -28,6 +30,7 @@ public:
     bool startOwned(const QString &configPath);
     bool requestGracefulStop();
     bool restart();
+    bool detachExternal();
     void updateHealth(const RouterHealth &health);
 
 signals:
