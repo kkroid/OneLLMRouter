@@ -67,9 +67,13 @@ jobs:
         shell: pwsh
         run: |
           go test -count=1 ./...
+          if ($LASTEXITCODE -ne 0) { throw "Go tests failed: $LASTEXITCODE" }
           go test -race -count=1 ./...
+          if ($LASTEXITCODE -ne 0) { throw "Go race tests failed: $LASTEXITCODE" }
           go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw "Go vet failed: $LASTEXITCODE" }
           go mod verify
+          if ($LASTEXITCODE -ne 0) { throw "Go module verification failed: $LASTEXITCODE" }
 
       - name: Build desktop and installer
         shell: pwsh
