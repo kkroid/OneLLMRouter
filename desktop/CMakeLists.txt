@@ -12,6 +12,8 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network Test)
 
 add_executable(onellm-router-tray WIN32
     src/main.cpp
+    src/proxy_probe.cpp
+    src/proxy_probe.h
     src/router_discovery.cpp
     src/router_discovery.h
     src/router_process.cpp

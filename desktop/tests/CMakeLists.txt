@@ -39,3 +39,15 @@ add_test(NAME version_contract_test COMMAND version_contract_test)
 set_tests_properties(version_contract_test PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
+
+add_executable(proxy_probe_test
+    proxy_probe_test.cpp
+    ../src/proxy_probe.cpp
+    ../src/proxy_probe.h
+)
+target_include_directories(proxy_probe_test PRIVATE ../src)
+target_link_libraries(proxy_probe_test PRIVATE Qt6::Test Qt6::Network)
+add_test(NAME proxy_probe_test COMMAND proxy_probe_test)
+set_tests_properties(proxy_probe_test PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
