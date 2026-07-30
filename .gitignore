@@ -28,3 +28,7 @@ Thumbs.db
 .worktrees/
 v1.1.0-plan.md
 onellm-router.exe
+
+# Qt desktop build output
+desktop/build/
+desktop/stage/
