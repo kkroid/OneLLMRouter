@@ -94,27 +94,28 @@ jobs:
           $configPath = Join-Path $env:USERPROFILE ".onellm\onellm-router.yaml"
           $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
           $legacyMarker = "OneLLMRouter release workflow marker"
+          $desktopRunValue = """$installDir\onellm-router-tray.exe"" --config ""$configPath"""
           New-Item -Path $runKey -Force | Out-Null
           New-ItemProperty -Path $runKey -Name "OneLLMRouter" -Value $legacyMarker -PropertyType String -Force | Out-Null
 
-          & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="!autostart"
+          & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart"
           if ($LASTEXITCODE -ne 0) { throw "Silent install failed: $LASTEXITCODE" }
           if ((Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter") -ne $legacyMarker) {
             throw "Installer changed the legacy OneLLMRouter Run value"
           }
-          if ($null -ne (Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter Desktop" -ErrorAction SilentlyContinue)) {
-            throw "Silent install unexpectedly enabled desktop autostart"
+          if ((Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter Desktop") -ne $desktopRunValue) {
+            throw "Silent install did not create the expected desktop autostart value"
           }
 
           $marker = "# OneLLMRouter config preservation marker $([guid]::NewGuid())"
           Set-Content -LiteralPath $configPath -Value $marker -Encoding utf8NoBOM
-          & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="!autostart"
+          & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart"
           if ($LASTEXITCODE -ne 0) { throw "Silent reinstall failed: $LASTEXITCODE" }
           if ((Get-Content -LiteralPath $configPath -Raw).Trim() -ne $marker) {
             throw "Silent reinstall overwrote the user configuration"
           }
-          if ($null -ne (Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter Desktop" -ErrorAction SilentlyContinue)) {
-            throw "Silent reinstall unexpectedly enabled desktop autostart"
+          if ((Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter Desktop") -ne $desktopRunValue) {
+            throw "Silent reinstall did not preserve the desktop autostart value"
           }
 
           $uninstaller = Join-Path $installDir "unins000.exe"
