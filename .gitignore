@@ -32,3 +32,4 @@ onellm-router.exe
 # Qt desktop build output
 desktop/build/
 desktop/stage/
+desktop/stage-*/
