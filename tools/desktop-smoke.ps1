@@ -155,11 +155,8 @@ providers:
 }
 finally {
     if ($trayStarted -and -not $trayProcess.HasExited) {
-        if ($identityConfirmed) {
-            $trayProcess.Kill()
-            $null = $trayProcess.WaitForExit(5000)
-        }
-        else {
+        $trayProcess.Kill()
+        if (-not $trayProcess.WaitForExit(5000)) {
             $cleanupProcessesExited = $false
         }
     }
