@@ -13,6 +13,7 @@ node_modules/
 
 # 临时文件
 tmp/
+.gocache/
 *.log
 
 # 系统文件
