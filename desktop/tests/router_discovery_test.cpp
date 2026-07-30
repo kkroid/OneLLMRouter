@@ -10,6 +10,7 @@ class RouterDiscoveryTest : public QObject
 
 private slots:
     void buildsConfigInfoArgumentsWithoutShell();
+    void localHealthProbeBypassesSystemProxy();
     void parsesSecretFreeConfigInfo();
     void rejectsUnknownConfigFields();
     void rejectsMalformedConfigInfo();
@@ -17,6 +18,7 @@ private slots:
     void rejectsWrongHealthIdentity();
     void classifiesExternalConflictAndAbsent();
     void redirectIsConflict();
+    void closedDynamicPortIsAbsent();
     void configInfoTimeoutReportsFailure();
     void configInfoTimeoutCanRetryAfterProcessFinishes();
     void overlappingDiscoveryDoesNotCreateSecondProbe();
@@ -26,6 +28,11 @@ void RouterDiscoveryTest::buildsConfigInfoArgumentsWithoutShell()
 {
     QCOMPARE(configInfoArguments("C:/tmp/router.yaml"),
              QStringList({"--config", "C:/tmp/router.yaml", "config-info", "--json"}));
+}
+
+void RouterDiscoveryTest::localHealthProbeBypassesSystemProxy()
+{
+    QCOMPARE(localHealthProxy().type(), QNetworkProxy::NoProxy);
 }
 
 void RouterDiscoveryTest::parsesSecretFreeConfigInfo()
@@ -140,6 +147,20 @@ void RouterDiscoveryTest::redirectIsConflict()
     QTRY_COMPARE_WITH_TIMEOUT(conflict.count(), 1, 3000);
 }
 
+void RouterDiscoveryTest::closedDynamicPortIsAbsent()
+{
+    QTcpServer server;
+    const quint16 port = safeDynamicPort(server);
+    QVERIFY(port != 0);
+    server.close();
+    RouterDiscovery discovery(fixturePath(), QString::number(port), 500);
+    QSignalSpy absent(&discovery, &RouterDiscovery::routerAbsent);
+    QSignalSpy conflict(&discovery, &RouterDiscovery::portConflict);
+    discovery.discover();
+    QTRY_COMPARE_WITH_TIMEOUT(absent.count(), 1, 2000);
+    QCOMPARE(conflict.count(), 0);
+}
+
 void RouterDiscoveryTest::configInfoTimeoutReportsFailure()
 {
     RouterDiscovery discovery(fixturePath(), "hang", 50);
@@ -174,9 +195,9 @@ void RouterDiscoveryTest::overlappingDiscoveryDoesNotCreateSecondProbe()
     QVERIFY(port != 0);
     int requests = 0;
     connect(&server, &QTcpServer::newConnection, &server, [&] {
-        ++requests;
         QTcpSocket *socket = server.nextPendingConnection();
-        connect(socket, &QTcpSocket::readyRead, socket, [socket, port] {
+        connect(socket, &QTcpSocket::readyRead, socket, [&, socket, port] {
+            ++requests;
             socket->readAll();
             const QByteArray body = QString(
                 R"({"status":"ok","service":"onellm-router","pid":1,"version":"1.4.0","http_port":%1,"models":0,"copilot_token":false})")

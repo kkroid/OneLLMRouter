@@ -27,6 +27,7 @@ $trayStarted = $false
 $observedHealth = $null
 $identityConfirmed = $false
 $cleanupProcessesExited = $true
+$smokePassed = $false
 
 function ConvertTo-YamlSingleQuoted {
     param([Parameter(Mandatory = $true)][string]$Value)
@@ -102,6 +103,7 @@ providers:
     $startInfo.WorkingDirectory = Split-Path -Parent $trayPath
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardError = $true
     $startInfo.ArgumentList.Add("--config")
     $startInfo.ArgumentList.Add($configPath)
     $startInfo.ArgumentList.Add("--smoke-test")
@@ -128,7 +130,18 @@ providers:
         Start-Sleep -Milliseconds 200
     }
     if (-not $identityConfirmed) {
-        throw "Tray did not expose a verified OneLLMRouter service on dynamic port $port"
+        $exitDetail = if ($trayProcess.HasExited) {
+            $stderr = $trayProcess.StandardError.ReadToEnd().Trim()
+            " and exited with code $($trayProcess.ExitCode): $stderr"
+        } else {
+            ""
+        }
+        $resultDetail = if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+            ": " + (Get-Content -LiteralPath $resultPath -Raw).Trim()
+        } else {
+            ""
+        }
+        throw "Tray did not expose a verified OneLLMRouter service on dynamic port $port$exitDetail$resultDetail"
     }
 
     $remaining = [Math]::Max(1, [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds)
@@ -151,6 +164,7 @@ providers:
     if (Test-DynamicPortOpen -DynamicPort $port) {
         throw "Dynamic service port remained open after graceful tray shutdown"
     }
+    $smokePassed = $true
     Write-Host "Desktop smoke passed on isolated port $port" -ForegroundColor Green
 }
 finally {
@@ -187,12 +201,13 @@ finally {
     $httpClient.Dispose()
     $httpHandler.Dispose()
 
-    if ($cleanupProcessesExited -and -not (Test-DynamicPortOpen -DynamicPort $port)) {
+    if ($smokePassed -and $cleanupProcessesExited -and
+        -not (Test-DynamicPortOpen -DynamicPort $port)) {
         if (Test-Path -LiteralPath $tempRoot) {
             Remove-Item -LiteralPath $tempRoot -Recurse -Force
         }
     }
     else {
-        Write-Warning "Smoke temp directory retained because test processes are still active: $tempRoot"
+        Write-Warning "Smoke temp directory retained for diagnostics: $tempRoot"
     }
 }

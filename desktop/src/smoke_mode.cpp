@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QDebug>
 #include <QSaveFile>
 
 namespace {
@@ -25,6 +26,11 @@ QJsonObject buildSmokeResult(qint64 pid, int port)
     };
 }
 
+int smokeObservationDelayMs()
+{
+    return 500;
+}
+
 SmokeRunner::SmokeRunner(QString configPath, QString resultPath,
                          QObject *parent)
     : QObject(parent),
@@ -35,25 +41,35 @@ SmokeRunner::SmokeRunner(QString configPath, QString resultPath,
 {
     m_startTimer.setSingleShot(true);
     m_startTimer.setInterval(30000);
-    connect(&m_startTimer, &QTimer::timeout, this, [this] { fail(5); });
+    connect(&m_startTimer, &QTimer::timeout, this,
+            [this] { fail(5, QStringLiteral("startup timed out")); });
     connect(&m_discovery, &RouterDiscovery::configFailed, this,
-            [this](const QString &) { fail(2); });
+            [this](const QString &message) {
+                qCritical().noquote() << "smoke config failure:" << message;
+                fail(2, message);
+            });
     connect(&m_discovery, &RouterDiscovery::portConflict, this,
-            [this](const RouterConfigInfo &, const QString &) { fail(3); });
+            [this](const RouterConfigInfo &, const QString &message) {
+                qCritical().noquote() << "smoke port conflict:" << message;
+                fail(3, message);
+            });
     connect(&m_discovery, &RouterDiscovery::routerAbsent, this,
             [this](const RouterConfigInfo &) {
                 if (m_process.ownership() == ProcessOwnership::Owned) {
                     QTimer::singleShot(250, &m_discovery,
                                        &RouterDiscovery::discover);
                 } else if (!m_process.startOwned(m_configPath)) {
-                    fail(4);
+                    fail(4, QStringLiteral("failed to start core"));
                 }
             });
     connect(&m_discovery, &RouterDiscovery::externalRouterFound, this,
             [this](const RouterConfigInfo &, const RouterHealth &health) {
                 if (m_process.ownership() != ProcessOwnership::Owned ||
                     health.pid != m_process.processId()) {
-                    fail(3);
+                    qCritical() << "smoke ownership mismatch"
+                                << int(m_process.ownership())
+                                << health.pid << m_process.processId();
+                    fail(3, QStringLiteral("owned process health PID mismatch"));
                 } else {
                     writeResultAndStop(health);
                 }
@@ -64,9 +80,12 @@ SmokeRunner::SmokeRunner(QString configPath, QString resultPath,
                                    &RouterDiscovery::discover);
             });
     connect(&m_process, &RouterProcess::processError, this,
-            [this](const QString &) { fail(4); });
+            [this](const QString &message) {
+                qCritical().noquote() << "smoke process failure:" << message;
+                fail(4, message);
+            });
     connect(&m_process, &RouterProcess::gracefulStopTimedOut, this,
-            [this] { fail(6); });
+            [this] { fail(6, QStringLiteral("graceful stop timed out")); });
     connect(&m_process, &RouterProcess::processFinished, this,
             [this](int, QProcess::ExitStatus) {
                 QCoreApplication::exit(m_resultWritten ? 0 : 4);
@@ -76,16 +95,29 @@ SmokeRunner::SmokeRunner(QString configPath, QString resultPath,
 void SmokeRunner::start()
 {
     if (m_configPath.isEmpty() || m_resultPath.isEmpty()) {
-        fail(2);
+        fail(2, QStringLiteral("missing smoke path"));
         return;
     }
     m_startTimer.start();
     m_discovery.discover();
 }
 
-void SmokeRunner::fail(int exitCode)
+void SmokeRunner::fail(int exitCode, const QString &message)
 {
     m_startTimer.stop();
+    if (!m_resultPath.isEmpty()) {
+        QSaveFile file(m_resultPath);
+        const QByteArray payload = QJsonDocument(QJsonObject{
+            {"service", "onellm-router"},
+            {"healthy", false},
+            {"exit_code", exitCode},
+            {"error", message},
+        }).toJson(QJsonDocument::Compact);
+        if (file.open(QIODevice::WriteOnly) &&
+            file.write(payload) == payload.size()) {
+            file.commit();
+        }
+    }
     QCoreApplication::exit(exitCode);
 }
 
@@ -98,11 +130,13 @@ void SmokeRunner::writeResultAndStop(const RouterHealth &health)
             .toJson(QJsonDocument::Compact);
     if (!file.open(QIODevice::WriteOnly) ||
         file.write(payload) != payload.size() || !file.commit()) {
-        fail(7);
+        fail(7, QStringLiteral("failed to write smoke result"));
         return;
     }
     m_resultWritten = true;
-    if (!m_process.requestGracefulStop()) {
-        fail(6);
-    }
+    QTimer::singleShot(smokeObservationDelayMs(), this, [this] {
+        if (!m_process.requestGracefulStop()) {
+            fail(6, QStringLiteral("failed to request graceful stop"));
+        }
+    });
 }

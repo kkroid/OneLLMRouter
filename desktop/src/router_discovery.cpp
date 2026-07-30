@@ -6,6 +6,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QSet>
+#include <QTcpServer>
 #include <QUrl>
 
 #ifdef Q_OS_WIN
@@ -35,6 +36,12 @@ bool isLoopbackHost(const QString &host)
            host == "127.0.0.1" || host == "::1";
 }
 
+QHostAddress loopbackAddress(const QString &host)
+{
+    return host == "::1" ? QHostAddress::LocalHostIPv6
+                          : QHostAddress::LocalHost;
+}
+
 ProbeTransport probeTransport(const QNetworkReply *reply)
 {
     if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).isValid()) {
@@ -59,6 +66,11 @@ ProbeTransport probeTransport(const QNetworkReply *reply)
 QStringList configInfoArguments(const QString &configPath)
 {
     return {"--config", configPath, "config-info", "--json"};
+}
+
+QNetworkProxy localHealthProxy()
+{
+    return QNetworkProxy(QNetworkProxy::NoProxy);
 }
 
 RouterConfigInfo parseRouterConfigInfo(const QByteArray &payload)
@@ -156,6 +168,7 @@ RouterDiscovery::RouterDiscovery(QString coreExecutable, QString configPath,
       m_network(new QNetworkAccessManager(this)),
       m_timeoutMs(timeoutMs)
 {
+    m_network->setProxy(localHealthProxy());
     m_configTimer.setSingleShot(true);
     connect(&m_configTimer, &QTimer::timeout, this, [this] {
         if (!m_busy || m_configProcess.state() == QProcess::NotRunning) return;
@@ -195,7 +208,7 @@ RouterDiscovery::RouterDiscovery(QString coreExecutable, QString configPath,
                     emit configFailed(QStringLiteral("Invalid config-info response"));
                     return;
                 }
-                probeHealth(config, m_generation);
+                probePort(config, m_generation);
             });
 }
 
@@ -216,6 +229,25 @@ void RouterDiscovery::discover()
 #endif
     m_configProcess.start();
     m_configTimer.start(m_timeoutMs);
+}
+
+void RouterDiscovery::probePort(const RouterConfigInfo &config,
+                                quint64 generation)
+{
+    QTcpServer availabilityProbe;
+    if (availabilityProbe.listen(loopbackAddress(config.host),
+                                 quint16(config.port))) {
+        availabilityProbe.close();
+        m_busy = false;
+        emit routerAbsent(config);
+        return;
+    }
+    if (availabilityProbe.serverError() == QAbstractSocket::AddressInUseError) {
+        probeHealth(config, generation);
+        return;
+    }
+    m_busy = false;
+    emit portConflict(config, availabilityProbe.errorString());
 }
 
 void RouterDiscovery::probeHealth(const RouterConfigInfo &config,
@@ -268,7 +300,14 @@ void RouterDiscovery::finishProbe(const RouterConfigInfo &config,
     } else if (classification == DiscoveryClassification::Absent) {
         emit routerAbsent(config);
     } else {
-        emit portConflict(config, QStringLiteral("Invalid router health identity"));
+        const QVariant status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        emit portConflict(
+            config,
+            QStringLiteral("Invalid router health identity (network=%1, http=%2, %3)")
+                .arg(int(reply->error()))
+                .arg(status.isValid() ? status.toInt() : 0)
+                .arg(reply->errorString()));
     }
     reply->deleteLater();
 }

@@ -7,6 +7,7 @@ class SmokeModeTest : public QObject
     Q_OBJECT
 private slots:
     void buildsOwnedHealthyResult();
+    void leavesObservationWindowBeforeShutdown();
 };
 
 void SmokeModeTest::buildsOwnedHealthyResult()
@@ -18,6 +19,11 @@ void SmokeModeTest::buildsOwnedHealthyResult()
     QVERIFY(result.value("healthy").toBool());
     QCOMPARE(result.value("pid").toInt(), 42);
     QCOMPARE(result.value("port").toInt(), 45678);
+}
+
+void SmokeModeTest::leavesObservationWindowBeforeShutdown()
+{
+    QVERIFY(smokeObservationDelayMs() >= 500);
 }
 
 QTEST_APPLESS_MAIN(SmokeModeTest)

@@ -8,6 +8,7 @@
 #include <QTimer>
 
 QJsonObject buildSmokeResult(qint64 pid, int port);
+int smokeObservationDelayMs();
 
 class SmokeRunner : public QObject
 {
@@ -20,7 +21,7 @@ public slots:
     void start();
 
 private:
-    void fail(int exitCode);
+    void fail(int exitCode, const QString &message = {});
     void writeResultAndStop(const RouterHealth &health);
 
     QString m_configPath;

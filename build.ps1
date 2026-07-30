@@ -6,6 +6,7 @@ param(
     [switch]$Installer,
     [string]$Version = "1.4.0",
     [string]$QtRoot = $env:QT_ROOT,
+    [string]$StageDirectory = "",
     [string]$CMake = "cmake",
     [string]$InnoSetup = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 )
@@ -16,7 +17,17 @@ if ($Installer) { $Desktop = $true }
 
 $outDir = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "dist"))
 $portable = Join-Path $outDir "onellm-router-v$Version.exe"
-$stage = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "desktop\stage"))
+$defaultStage = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "desktop\stage"))
+$desktopRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "desktop"))
+$stage = if ([string]::IsNullOrWhiteSpace($StageDirectory)) {
+    $defaultStage
+} else {
+    [IO.Path]::GetFullPath($StageDirectory)
+}
+if (-not $stage.StartsWith($desktopRoot + [IO.Path]::DirectorySeparatorChar,
+        [StringComparison]::OrdinalIgnoreCase)) {
+    throw "StageDirectory must be inside $desktopRoot"
+}
 $core = Join-Path $stage "onellm-router-core.exe"
 $desktopBuild = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "desktop\build"))
 
@@ -51,12 +62,12 @@ try {
     if ($Clean) {
         Remove-GeneratedDirectory -Path $outDir -ExpectedPath (Join-Path $PSScriptRoot "dist")
     }
-    Remove-GeneratedDirectory -Path $stage -ExpectedPath (Join-Path $PSScriptRoot "desktop\stage")
+    Remove-GeneratedDirectory -Path $stage -ExpectedPath $stage
     New-Item -ItemType Directory -Path $outDir, $stage -Force | Out-Null
 
     Write-Host "=== Build portable core v$Version ===" -ForegroundColor Cyan
     $ldflags = "-s -w -X main.version=$Version"
-    & go build -trimpath -ldflags=$ldflags -o $portable ./cmd/onellm-router/
+    & go build -trimpath -ldflags $ldflags -o $portable ./cmd/onellm-router/
     if ($LASTEXITCODE -ne 0) { throw "Portable core build failed" }
     Copy-Item -LiteralPath $portable -Destination $core -Force
 

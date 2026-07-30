@@ -3,6 +3,7 @@
 #include "router_types.h"
 
 #include <QNetworkReply>
+#include <QNetworkProxy>
 #include <QObject>
 #include <QProcess>
 #include <QStringList>
@@ -34,6 +35,7 @@ enum class DiscoveryClassification {
 };
 
 QStringList configInfoArguments(const QString &configPath);
+QNetworkProxy localHealthProxy();
 RouterConfigInfo parseRouterConfigInfo(const QByteArray &payload);
 RouterHealth parseRouterHealth(const QByteArray &payload);
 DiscoveryClassification classifyHealthProbe(ProbeTransport transport,
@@ -58,6 +60,7 @@ signals:
     void portConflict(const RouterConfigInfo &config, const QString &message);
 
 private:
+    void probePort(const RouterConfigInfo &config, quint64 generation);
     void probeHealth(const RouterConfigInfo &config, quint64 generation);
     void finishProbe(const RouterConfigInfo &config, QNetworkReply *reply,
                      quint64 generation);
