@@ -266,13 +266,14 @@ func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler 
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		health := map[string]interface{}{
-			"status":        "ok",
-			"models":        len(resolver.AllModelIDs()),
-			"copilot_token": tokenMgr.CheckTokenAvailable(),
-			"http_port":     cfg.Server.HTTPPort,
-			"version":       version,
-		}
+		health := buildHealthPayload(
+			version,
+			os.Getpid(),
+			cfg.Server.HTTPPort,
+			len(resolver.AllModelIDs()),
+			tokenMgr.CheckTokenAvailable(),
+			cfg.Proxy.Socks5,
+		)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(health)
 	})
