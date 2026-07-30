@@ -16,8 +16,8 @@ func watchTrayControl(input io.Reader, stop func()) {
 	}
 }
 
-func shouldStartNativeTray(trayChild bool) bool {
-	return !trayChild
+func shouldWatchTrayControl(trayChild bool) bool {
+	return trayChild
 }
 
 func shouldDetachFromTerminal(daemon, trayChild bool) bool {

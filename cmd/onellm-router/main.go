@@ -26,7 +26,6 @@ import (
 
 	"github.com/kkroid/onellm-router/internal/proxy"
 	"github.com/kkroid/onellm-router/internal/router"
-	"github.com/kkroid/onellm-router/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -149,10 +148,6 @@ func serveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create direct client: %w", err)
 			}
-			// Bell: beep on error, default on
-			bell := cfg.Server.Bell == nil || *cfg.Server.Bell
-			ui.SetBell(bell)
-
 			proxyHandler := proxy.NewHandler(resolver, tokenMgr, httpClient, directClient, logger)
 			proxyHandler.Catalog.SetReasoningMappings(codexReasoningMappings(cfg.Codex.Models))
 
@@ -201,14 +196,12 @@ func serveCmd() *cobra.Command {
 				go generateCodexCatalog(cmd.Context(), proxyHandler.Catalog, providers, options, logger)
 			}
 
-			// Shutdown coordination: tray or signal
+			// Shutdown coordination: Qt tray child control or signal
 			doneCh := make(chan struct{})
 			once := new(sync.Once)
 			stop := func() { once.Do(func() { close(doneCh) }) }
 
-			if shouldStartNativeTray(trayChild) {
-				go ui.NewTray(cfg.Server.HTTPPort, version, nil, stop).Run()
-			} else {
+			if shouldWatchTrayControl(trayChild) {
 				go watchTrayControl(os.Stdin, stop)
 			}
 

@@ -2,7 +2,7 @@
 
 **个人 AI 模型路由网关** — 将 GitHub Copilot Claude 模型 + 任意 Anthropic-compatible API 统一暴露为标准 Anthropic 和 OpenAI 接口，供 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 等工具使用。
 
-**~8 MB 单文件，零运行时依赖。**
+提供两种发布形式：无运行时依赖的 Go 便携版，以及带 Qt 系统托盘和安装程序的桌面版。
 
 ## 架构
 
@@ -256,7 +256,7 @@ onellm-router --config <path> config-info --json
 
 JSON 固定包含 `service`、绝对 `config_path`、`host`、`http_port`、`log_dir`、`proxy_socks5`、`bell`、`onellm_catalog_path` 和 `codex_catalog_path`。`/health` 提供 `service`、`pid`、版本、端口、模型数、Copilot token 状态和代理地址，且不会为健康检查访问上游。
 
-桌面父进程使用 `onellm-router serve --tray-child --config <path>` 启动自己拥有的 core 子进程。此内部标志会保留 stdin、禁用原生托盘，并只在 stdin 收到独立的 `shutdown` 行时优雅退出；它不是 `--daemon` 的通用替代。
+桌面父进程使用 `onellm-router serve --tray-child --config <path>` 启动自己拥有的 core 子进程。此内部标志会保留 stdin，并只在 stdin 收到独立的 `shutdown` 行时优雅退出；它不是 `--daemon` 的通用替代。Go 便携版不包含系统托盘，桌面交互统一由 `onellm-router-tray.exe` 提供。
 
 ## 项目结构
 
@@ -270,10 +270,11 @@ OneLLMRouter/
 │   ├── log/                           # slog + 按日滚动
 │   ├── proxy/                         # HTTP 代理 (Copilot + External)
 │   ├── router/                        # Provider 解析 + 模型路由
-│   ├── translate/                     # Anthropic ↔ OpenAI 协议翻译
-│   └── ui/                            # Windows 托盘与状态图标
+│   └── translate/                     # Anthropic ↔ OpenAI 协议翻译
+├── desktop/                           # Qt 6 托盘、状态图标与测试
+├── installer/                         # Inno Setup 安装程序
 ├── onellm-router.example.yaml          # 配置模板
-├── build.ps1                          # 编译脚本
+├── build.ps1                          # 便携版与桌面版构建脚本
 └── go.mod
 ```
 

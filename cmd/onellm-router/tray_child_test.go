@@ -23,14 +23,14 @@ func TestWatchTrayControlIgnoresEOFAndOtherLines(t *testing.T) {
 }
 
 func TestTrayChildLifecycleDecisions(t *testing.T) {
-	if shouldStartNativeTray(true) {
-		t.Fatal("tray child started native tray")
+	if !shouldWatchTrayControl(true) {
+		t.Fatal("tray child did not watch Qt control input")
 	}
 	if shouldDetachFromTerminal(true, true) {
 		t.Fatal("tray child detached from terminal")
 	}
-	if !shouldStartNativeTray(false) {
-		t.Fatal("default mode suppressed native tray")
+	if shouldWatchTrayControl(false) {
+		t.Fatal("portable mode watched tray control input")
 	}
 	if !shouldDetachFromTerminal(true, false) {
 		t.Fatal("daemon mode did not detach")

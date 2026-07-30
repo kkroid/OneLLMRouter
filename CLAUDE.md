@@ -154,8 +154,9 @@ go test ./...
 ### 内部桌面契约
 
 - `onellm-router --config <path> config-info --json`：加载并校验配置，只输出桌面发现所需的非敏感 JSON。
-- `onellm-router serve --tray-child --config <path>`：桌面托盘拥有的 core 子进程模式；不 detach、不启动原生托盘，stdin 仅接受独立的 `shutdown` 行。
+- `onellm-router serve --tray-child --config <path>`：Qt 桌面托盘拥有的 core 子进程模式；不 detach，stdin 仅接受独立的 `shutdown` 行。
 - `--tray-child` 是内部集成标志，不替代用户直接运行时使用的 `--daemon`。
+- Go 便携版不包含原生托盘；桌面交互统一由 `onellm-router-tray.exe` 提供。
 - `/health` 只读取本地运行状态，不得为健康检查访问上游。
 
 ---
