@@ -14,7 +14,7 @@ private slots:
     void buildsConfigInfoArgumentsWithoutShell();
     void localHealthProbeBypassesSystemProxy();
     void parsesSecretFreeConfigInfo();
-    void rejectsUnknownConfigFields();
+    void ignoresUnknownConfigFields();
     void rejectsMalformedConfigInfo();
     void parsesExpectedRouterHealth();
     void matchesHealthToSelectedConfig();
@@ -58,7 +58,7 @@ void RouterDiscoveryTest::parsesSecretFreeConfigInfo()
     QCOMPARE(config.proxySocks5, QString("127.0.0.1:1082"));
 }
 
-void RouterDiscoveryTest::rejectsUnknownConfigFields()
+void RouterDiscoveryTest::ignoresUnknownConfigFields()
 {
     const auto config = parseRouterConfigInfo(R"({
         "service":"onellm-router",
@@ -72,7 +72,8 @@ void RouterDiscoveryTest::rejectsUnknownConfigFields()
         "codex_catalog_path":"C:/tmp/b.json",
         "api_key":"must-not-be-consumed"
     })");
-    QVERIFY(!config.valid);
+    QVERIFY(config.valid);
+    QCOMPARE(config.port, 45678);
 }
 
 void RouterDiscoveryTest::rejectsMalformedConfigInfo()

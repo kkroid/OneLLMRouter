@@ -6,7 +6,6 @@
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
-#include <QSet>
 #include <QTcpServer>
 #include <QUrl>
 
@@ -83,14 +82,7 @@ RouterConfigInfo parseRouterConfigInfo(const QByteArray &payload)
     }
 
     const QJsonObject object = document.object();
-    const QSet<QString> expectedKeys = {
-        "service", "config_path", "host", "http_port", "log_dir",
-        "proxy_socks5", "bell", "onellm_catalog_path", "codex_catalog_path",
-    };
-    const QStringList actualKeyList = object.keys();
-    const QSet<QString> actualKeys(actualKeyList.cbegin(), actualKeyList.cend());
-    if (actualKeys != expectedKeys ||
-        object.value("service").toString() != "onellm-router" ||
+    if (object.value("service").toString() != "onellm-router" ||
         !isString(object, "config_path") || !isString(object, "host") ||
         !isIntegerInRange(object.value("http_port"), 1, 65535) ||
         !isString(object, "log_dir") || !isString(object, "proxy_socks5") ||
