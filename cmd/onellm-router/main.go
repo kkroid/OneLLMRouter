@@ -111,6 +111,11 @@ func serveCmd() *cobra.Command {
 					return fmt.Errorf("port %s is in use", httpAddr)
 				}
 			}
+			listener, err := net.Listen("tcp", httpAddr)
+			if err != nil {
+				return fmt.Errorf("listen %s: %w", httpAddr, err)
+			}
+			defer listener.Close()
 
 			logCfg := onellmLog.FromConfig(cfg.Log.Level, cfg.Log.Dir, cfg.Log.MaxAgeDays)
 			logger, cleanup, err := onellmLog.Setup(logCfg)
@@ -163,13 +168,12 @@ func serveCmd() *cobra.Command {
 			mux := http.NewServeMux()
 			registerRoutes(mux, resolver, proxyHandler, cfg, logger)
 
-			httpServer := &http.Server{Addr: httpAddr, Handler: withRequestID(mux, logger)}
+			httpServer := &http.Server{Handler: withRequestID(mux, logger)}
+			serverErrCh := make(chan error, 1)
 
 			go func() {
 				logger.Info("HTTP server listening", "addr", httpAddr)
-				if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-					logger.Error("HTTP server error", "error", err)
-				}
+				serverErrCh <- httpServer.Serve(listener)
 			}()
 
 			userHome, err := os.UserHomeDir()
@@ -196,7 +200,15 @@ func serveCmd() *cobra.Command {
 				stop()
 			}()
 
-			<-doneCh
+			var serveErr error
+			select {
+			case <-doneCh:
+			case err := <-serverErrCh:
+				if err != nil && !errors.Is(err, http.ErrServerClosed) {
+					serveErr = err
+					logger.Error("HTTP server error", "error", err)
+				}
+			}
 			logger.Info("shutting down")
 
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -206,6 +218,9 @@ func serveCmd() *cobra.Command {
 			}
 
 			logger.Info("onellm-router stopped")
+			if serveErr != nil {
+				return fmt.Errorf("HTTP server: %w", serveErr)
+			}
 			return nil
 		},
 	}
