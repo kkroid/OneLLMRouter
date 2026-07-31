@@ -107,7 +107,9 @@ Setup copies `onellm-router.example.yaml` to `%USERPROFILE%\.onellm\onellm-route
 
 The optional start-on-login task registers only `onellm-router-tray.exe`, with an explicit absolute `--config` argument. The tray then owns the core it starts. Existing CLI-based auto-start remains supported for portable users, but a tray that discovers that instance attaches read-only.
 
-The installer never kills a running process. If an installed executable is locked during upgrade, Setup stops and asks the user to close that installation manually.
+The installer never terminates by process name or PID. During upgrade,
+Windows Restart Manager requests a normal tray exit; if the application does
+not close, Setup stops instead of force-killing it.
 
 ## Development Safety
 
@@ -124,5 +126,8 @@ The production instance and its configured port are protected throughout impleme
 ## Release Quality
 
 The release workflow builds the Go core, Qt tray, Qt deployment tree, and Inno Setup package from source. It must not rely on committed executables, DLLs, Qt plugins, or generated build directories.
+Third-party actions are pinned to full commit SHAs. The build job has
+read-only repository permissions; only the tag-only publishing job receives
+`contents: write`.
 
 Release verification covers Go unit and race tests, Qt unit tests, an isolated-port core/tray smoke test, silent install/uninstall on a clean runner, upgrade preservation of user configuration, portable version output, build metadata, and SHA256 hashes for both artifacts.
