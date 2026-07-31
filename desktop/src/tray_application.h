@@ -23,6 +23,8 @@ bool shouldAutoStartRouter(ProcessOwnership ownership, bool autoStartAllowed);
 bool healthMatchesOwnedProcess(ProcessOwnership ownership, qint64 processId,
                                const RouterHealth &health);
 QString autoStartCommand(const QString &executable, const QString &configPath);
+QString applicationRestartArguments(const QString &configPath);
+bool registerApplicationRestart(const QString &configPath);
 QString autoStartValueName();
 QString legacyAutoStartValueName();
 void configureAutoStart(QSettings &settings, bool enabled,

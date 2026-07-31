@@ -81,6 +81,7 @@ jobs:
           pwsh -NoProfile -File .\tools\build-safety-test.ps1
           pwsh -NoProfile -File .\tools\desktop-smoke-safety-test.ps1
           pwsh -NoProfile -File .\tools\installer-autostart-contract-test.ps1
+          pwsh -NoProfile -File .\tools\installer-upgrade-contract-test.ps1
 
       - name: Build desktop and installer
         shell: pwsh

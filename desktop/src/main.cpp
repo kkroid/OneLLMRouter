@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QDebug>
 #include <QDir>
 #include <QFileInfo>
 #include <QTimer>
@@ -38,6 +39,9 @@ int main(int argc, char *argv[])
         return application.exec();
     }
 
+    if (!registerApplicationRestart(configPath)) {
+        qWarning() << "Failed to register application restart";
+    }
     TrayApplication tray(configPath);
     return application.exec();
 }

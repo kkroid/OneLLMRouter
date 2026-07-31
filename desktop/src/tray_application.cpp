@@ -8,6 +8,10 @@
 #include <QSettings>
 #include <QUrl>
 
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
+
 namespace {
 QString corePath()
 {
@@ -47,6 +51,25 @@ QString autoStartCommand(const QString &executable, const QString &configPath)
     return QString("\"%1\" --config \"%2\"")
         .arg(QDir::toNativeSeparators(executable),
              QDir::toNativeSeparators(configPath));
+}
+
+QString applicationRestartArguments(const QString &configPath)
+{
+    return QString("--config \"%1\"")
+        .arg(QDir::toNativeSeparators(configPath));
+}
+
+bool registerApplicationRestart(const QString &configPath)
+{
+#ifdef Q_OS_WIN
+    const QString arguments = applicationRestartArguments(configPath);
+    return SUCCEEDED(::RegisterApplicationRestart(
+        reinterpret_cast<PCWSTR>(arguments.utf16()),
+        RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_REBOOT));
+#else
+    Q_UNUSED(configPath);
+    return true;
+#endif
 }
 
 QString autoStartValueName()

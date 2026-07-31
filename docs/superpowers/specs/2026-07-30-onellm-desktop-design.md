@@ -99,6 +99,9 @@ cannot compete for the configured port after sign-in.
 Install per-user to `%LOCALAPPDATA%\Programs\OneLLMRouter` without administrator privileges. Store mutable state in `%USERPROFILE%\.onellm`.
 The desktop package carries the x64 MSVC runtime DLLs app-local, so a clean
 Windows installation does not need a separate VC++ Redistributable install.
+The tray registers its current configuration command with Windows Restart
+Manager. Setup closes a running tray before replacing binaries and restarts it
+after the upgrade, including for silent installs.
 
 Setup copies `onellm-router.example.yaml` to `%USERPROFILE%\.onellm\onellm-router.yaml` only when the destination does not exist. Upgrades and uninstall never remove or overwrite user configuration, API keys, logs, or generated catalogs.
 

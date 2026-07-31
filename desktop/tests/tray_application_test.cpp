@@ -11,6 +11,7 @@ class TrayApplicationTest : public QObject
 
 private slots:
     void quotesAutoStartCommand();
+    void quotesApplicationRestartArguments();
     void usesDedicatedAutoStartValue();
     void migratesLegacyAutoStartValue();
     void disablingAutoStartRemovesCurrentAndLegacyValues();
@@ -33,6 +34,14 @@ void TrayApplicationTest::quotesAutoStartCommand()
         QDir::toNativeSeparators("C:/Users/Test User/router.yaml");
     QCOMPARE(autoStartCommand(executable, config),
              QString("\"%1\" --config \"%2\"").arg(executable, config));
+}
+
+void TrayApplicationTest::quotesApplicationRestartArguments()
+{
+    const QString config =
+        QDir::toNativeSeparators("C:/Users/Test User/router.yaml");
+    QCOMPARE(applicationRestartArguments(config),
+             QString("--config \"%1\"").arg(config));
 }
 
 void TrayApplicationTest::usesDedicatedAutoStartValue()

@@ -22,8 +22,8 @@ OutputBaseFilename=OneLLMRouter-{#AppVersion}-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-CloseApplications=no
-RestartApplications=no
+CloseApplications=yes
+RestartApplications=yes
 UninstallDisplayIcon={app}\{#AppExeName}
 
 [Tasks]
