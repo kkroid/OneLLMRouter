@@ -14,6 +14,20 @@ log:
 proxy:
   socks5: "127.0.0.1:1082"
 
+# 全局上游重试，默认启用。
+# max_attempts: 15 包含首次调用；max_elapsed: 5m 是整个错误恢复预算。
+# max_delay: 30s 是单次等待上限。
+# 所有可见的非 2xx 状态一视同仁重试，不使用状态码白名单。
+# 无效 API key、错误 URL、不支持模型等永久错误也可能延迟到接近 5 分钟才返回。
+retry:
+  enabled: true
+  max_attempts: 15
+  initial_delay: 1s
+  max_delay: 30s
+  max_elapsed: 5m
+  jitter: 0.2
+  honor_retry_after: true
+
 codex:
   # 始终生成 ~/.onellm/model-catalog.json；默认同时覆盖 ~/.codex/model-catalog.json
   overwrite_catalog: true

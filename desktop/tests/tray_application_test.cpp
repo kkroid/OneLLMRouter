@@ -18,6 +18,7 @@ private slots:
     void externalPolicyHasNoDestructiveActions();
     void conflictPolicyHasNoDestructiveActions();
     void explicitStopDisablesAutomaticRestart();
+    void explicitStopSuppressesAutoStartWhenStopRequestFails();
     void ownedHealthMustMatchChildPid();
     void selectsEnglishAndChineseStrings();
     void rateLimitsIdenticalNotifications();
@@ -102,6 +103,20 @@ void TrayApplicationTest::explicitStopDisablesAutomaticRestart()
     QVERIFY(shouldAutoStartRouter(ProcessOwnership::None, true));
     QVERIFY(!shouldAutoStartRouter(ProcessOwnership::None, false));
     QVERIFY(!shouldAutoStartRouter(ProcessOwnership::External, true));
+}
+
+void TrayApplicationTest::explicitStopSuppressesAutoStartWhenStopRequestFails()
+{
+    TrayApplication tray("C:/tmp/router.yaml", false);
+    auto *discovery = tray.findChild<RouterDiscovery *>();
+    auto *process = tray.findChild<RouterProcess *>();
+    QVERIFY(discovery);
+    QVERIFY(process);
+
+    QVERIFY(QMetaObject::invokeMethod(&tray, "stopOwned",
+                                      Qt::DirectConnection));
+    discovery->routerAbsent({});
+    QVERIFY(!process->hasChildProcess());
 }
 
 void TrayApplicationTest::ownedHealthMustMatchChildPid()

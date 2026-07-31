@@ -46,11 +46,13 @@ public:
                              QObject *parent = nullptr);
     QMenu *menu();
 
+private slots:
+    void stopOwned();
+
 private:
     void rebuildMenu();
     void discover();
     void startOwned();
-    void stopOwned();
     void setState(RouterState state, const QString &detail = {});
     QString stateText() const;
     void setAutoStartEnabled(bool enabled);

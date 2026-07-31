@@ -117,6 +117,28 @@ func TestListPreservesSuccessfulProvidersWhenAnotherSourceFails(t *testing.T) {
 	}
 }
 
+func TestListCatalogStillFollowsRedirects(t *testing.T) {
+	models := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"data":[{"id":"redirected-model"}]}`)
+	}))
+	defer models.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, models.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer redirect.Close()
+
+	service := New(func(*router.Provider) *http.Client { return http.DefaultClient })
+	result := service.List(context.Background(), []router.Provider{{
+		Prefix:           "redirect",
+		ResponsesBaseURL: redirect.URL,
+	}}, router.EndpointResponses)
+
+	if len(result.Errors) != 0 {
+		t.Fatalf("redirected catalog errors: %+v", result.Errors)
+	}
+	assertModelIDs(t, result.Models, "redirect/redirected-model")
+}
+
 func TestListPreservesUpstreamCodexReasoningMetadata(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"models":[{"slug":"future-model","display_name":"Upstream Future","description":"upstream","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"high","description":"Upstream high"}],"shell_type":"shell_command","visibility":"list","supported_in_api":true,"priority":7,"availability_nux":null,"upgrade":null,"base_instructions":"upstream instructions","supports_reasoning_summaries":true,"support_verbosity":true,"default_verbosity":"low","apply_patch_tool_type":"freeform","truncation_policy":{"mode":"tokens","limit":12345},"supports_parallel_tool_calls":true,"experimental_supported_tools":[],"context_window":654321}]}`)

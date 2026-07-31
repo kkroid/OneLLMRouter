@@ -101,54 +101,12 @@ jobs:
           pwsh -NoProfile -File .\tools\desktop-runtime-contract-test.ps1 -StageDirectory .\desktop\stage
           pwsh -NoProfile -File .\tools\desktop-smoke.ps1 -Tray .\desktop\stage\onellm-router-tray.exe -ProtectedPorts 3456,3457
 
-      - name: Verify silent install preservation and autostart migration
+      - name: Verify running installer upgrade
         shell: pwsh
         run: |
-          $setup = (Resolve-Path -LiteralPath ".\dist\OneLLMRouter-$env:RELEASE_VERSION-setup.exe").Path
-          $installDir = Join-Path $env:LOCALAPPDATA "Programs\OneLLMRouter"
-          $configPath = Join-Path $env:USERPROFILE ".onellm\onellm-router.yaml"
-          $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-          $legacyMarker = "OneLLMRouter release workflow marker"
-          $desktopRunValue = """$installDir\onellm-router-tray.exe"" --config ""$configPath"""
-          New-Item -Path $runKey -Force | Out-Null
-          New-ItemProperty -Path $runKey -Name "OneLLMRouter" -Value $legacyMarker -PropertyType String -Force | Out-Null
-
-          & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart"
-          if ($LASTEXITCODE -ne 0) { throw "Silent install failed: $LASTEXITCODE" }
-          if ($null -ne (Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter" -ErrorAction SilentlyContinue)) {
-            throw "Installer left the legacy OneLLMRouter Run value behind"
-          }
-          if ((Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter Desktop") -ne $desktopRunValue) {
-            throw "Silent install did not create the expected desktop autostart value"
-          }
-
-          $marker = "# OneLLMRouter config preservation marker $([guid]::NewGuid())"
-          Set-Content -LiteralPath $configPath -Value $marker -Encoding utf8NoBOM
-          & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart"
-          if ($LASTEXITCODE -ne 0) { throw "Silent reinstall failed: $LASTEXITCODE" }
-          if ((Get-Content -LiteralPath $configPath -Raw).Trim() -ne $marker) {
-            throw "Silent reinstall overwrote the user configuration"
-          }
-          if ((Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter Desktop") -ne $desktopRunValue) {
-            throw "Silent reinstall did not preserve the desktop autostart value"
-          }
-
-          $uninstaller = Join-Path $installDir "unins000.exe"
-          if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
-            throw "Uninstaller not found: $uninstaller"
-          }
-          & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-          if ($LASTEXITCODE -ne 0) { throw "Silent uninstall failed: $LASTEXITCODE" }
-          if (-not (Test-Path -LiteralPath $configPath -PathType Leaf) -or
-              (Get-Content -LiteralPath $configPath -Raw).Trim() -ne $marker) {
-            throw "Uninstall removed or changed the user configuration"
-          }
-          if ($null -ne (Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter" -ErrorAction SilentlyContinue)) {
-            throw "Uninstall restored the legacy OneLLMRouter Run value"
-          }
-          if ($null -ne (Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter Desktop" -ErrorAction SilentlyContinue)) {
-            throw "Uninstall left the desktop autostart value behind"
-          }
+          pwsh -NoProfile -File .\tools\installer-running-upgrade-test.ps1 `
+            -Setup .\dist\OneLLMRouter-$env:RELEASE_VERSION-setup.exe `
+            -ProtectedPorts 3456,3457
 
       - name: Generate checksums
         shell: pwsh

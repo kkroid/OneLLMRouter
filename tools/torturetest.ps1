@@ -3,7 +3,7 @@ param(
     [int]$MockPort = 4868,
     [int]$DurationSeconds = 300,
     [int]$TimeoutSeconds = 10,
-    [string]$Binary = ".\dist\onellm-router-v1.3.2.exe",
+    [string]$Binary = ".\dist\onellm-router-v1.4.0.exe",
     [int]$Clients = 1,
     [switch]$Worker,
     [string]$BaseUrl = "",
@@ -172,6 +172,12 @@ function Invoke-TortureCases([hashtable]$Stats, [string]$Base, [datetime]$Deadli
             $j = $r.Content | ConvertFrom-Json
             if ($j.choices[0].message.content -ne "ok") { throw "bad openai text" }
         }
+        Add-Result $Stats "openai_nonstream_retry_recovery" {
+            $openAIRetryRequestID = [Guid]::NewGuid().ToString("N")
+            $r = Invoke-JsonPost "$Base/openai/v1/chat/completions" @{ model = "mk/mock-model"; max_tokens = 16; messages = @(@{ role = "user"; content = "retry_nonstream:$openAIRetryRequestID" }) }
+            $j = $r.Content | ConvertFrom-Json
+            if ($j.choices[0].message.content -ne "retry_nonstream_recovered") { throw "OpenAI non-stream retry did not recover" }
+        }
         Add-Result $Stats "openai_tool_stream_cancel_id" {
             Read-CancelStream "$Base/openai/v1/chat/completions" @{ model = "mk/mock-model"; max_tokens = 16; stream = $true; messages = @(@{ role = "user"; content = "weather" }); tools = @(@{ type = "function"; function = @{ name = "get_weather"; parameters = @{ type = "object" } } }) } 160
         }
@@ -241,6 +247,11 @@ function Invoke-TortureCases([hashtable]$Stats, [string]$Base, [datetime]$Deadli
             $out = Invoke-CurlPost "$Base/anthropic/v1/messages" @{ model = "mk/mock-model"; max_tokens = 16; stream = $true; messages = @(@{ role = "user"; content = "stream_ping" }) }
             if ($out -notmatch "event: ping" -or $out -notmatch "event: message_stop") { throw "stream ping output mismatch" }
         }
+        Add-Result $Stats "anthropic_stream_header_retry_recovery" {
+            $anthropicRetryRequestID = [Guid]::NewGuid().ToString("N")
+            $out = Invoke-CurlPost "$Base/anthropic/v1/messages" @{ model = "mk/mock-model"; max_tokens = 16; stream = $true; messages = @(@{ role = "user"; content = "retry_stream_headers:$anthropicRetryRequestID" }) }
+            if ($out -notmatch "retry-stream-recovered" -or $out -notmatch "event: message_stop") { throw "Anthropic stream header retry did not recover" }
+        }
         Add-Result $Stats "anthropic_stream_missing_stop_then_retry" {
             $out = Invoke-CurlPost "$Base/anthropic/v1/messages" @{ model = "mk/mock-model"; max_tokens = 16; stream = $true; messages = @(@{ role = "user"; content = "stream_missing_stop" }) }
             if ($out -notmatch "partial") { throw "missing-stop stream did not return partial output" }
@@ -256,7 +267,7 @@ function Invoke-TortureCases([hashtable]$Stats, [string]$Base, [datetime]$Deadli
 function Invoke-SilentCases([hashtable]$Stats, [string]$Base) {
     Add-Result $Stats "anthropic_silent_nonstream_timeout" {
         $r = Invoke-JsonPostAllowError "$Base/anthropic/v1/messages" @{ model = "mk/mock-model"; max_tokens = 16; messages = @(@{ role = "user"; content = "silent_nonstream" }) }
-        if ([int]$r.StatusCode -ne 502 -or $r.Content -notmatch "timeout waiting for upstream response") {
+        if ([int]$r.StatusCode -ne 504 -or $r.Content -notmatch "OneLLMRouter upstream request failed") {
             throw "expected non-stream timeout, got status=$($r.StatusCode) body=$($r.Content)"
         }
     }
@@ -369,8 +380,20 @@ import (
   "io"
   "net/http"
   "strings"
+  "sync"
   "time"
 )
+
+var retryAttempts sync.Map
+
+func failFirstAttempt(key string) bool {
+  _, loaded := retryAttempts.LoadOrStore(key, struct{}{})
+  if loaded {
+    retryAttempts.Delete(key)
+    return false
+  }
+  return true
+}
 
 func main() {
   mux := http.NewServeMux()
@@ -383,6 +406,21 @@ func main() {
 func anthropic(w http.ResponseWriter, r *http.Request) {
   body, _ := io.ReadAll(r.Body)
   s := string(body)
+  if strings.Contains(s, "retry_stream_headers") {
+    if failFirstAttempt("anthropic:" + s) {
+      http.Error(w, "temporary stream failure", http.StatusServiceUnavailable)
+      return
+    }
+    w.Header().Set("Content-Type", "text/event-stream")
+    f, _ := w.(http.Flusher)
+    fmt.Fprintf(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"mock\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n")
+    fmt.Fprintf(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+    fmt.Fprintf(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"retry-stream-recovered\"}}\n\n")
+    fmt.Fprintf(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+    fmt.Fprintf(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+    f.Flush()
+    return
+  }
   if strings.Contains(s, "silent_nonstream") {
     time.Sleep(10 * time.Second)
     return
@@ -496,6 +534,15 @@ func anthropic(w http.ResponseWriter, r *http.Request) {
 func openai(w http.ResponseWriter, r *http.Request) {
   body, _ := io.ReadAll(r.Body)
   s := string(body)
+  if strings.Contains(s, "retry_nonstream") {
+    if failFirstAttempt("openai:" + s) {
+      http.Error(w, "temporary non-stream failure", http.StatusBadGateway)
+      return
+    }
+    w.Header().Set("Content-Type", "application/json")
+    fmt.Fprintf(w, "{\"id\":\"chat_retry\",\"object\":\"chat.completion\",\"model\":\"mock\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"retry_nonstream_recovered\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}")
+    return
+  }
   if strings.Contains(s, "upstream_cut") {
     w.Header().Set("Content-Type", "text/event-stream")
     f, _ := w.(http.Flusher)
@@ -545,6 +592,14 @@ log:
   max_age_days: 1
 proxy:
   socks5: ""
+retry:
+  enabled: true
+  max_attempts: 3
+  initial_delay: "10ms"
+  max_delay: "20ms"
+  max_elapsed: "2s"
+  jitter: 0
+  honor_retry_after: true
 providers:
   - name: "Mock"
     prefix: "mk"

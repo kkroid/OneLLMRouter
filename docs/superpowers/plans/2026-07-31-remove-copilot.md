@@ -70,4 +70,3 @@
 - [ ] Request independent specification and code-quality reviews.
 - [ ] Commit the removal as a focused change.
 - [ ] Re-run the v1.4.0 audit and begin fixing the remaining findings.
-

@@ -12,9 +12,11 @@ import (
 	"strings"
 
 	"github.com/kkroid/onellm-router/internal/catalog"
+	"github.com/kkroid/onellm-router/internal/config"
 	onellmLog "github.com/kkroid/onellm-router/internal/log"
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/translate"
+	"github.com/kkroid/onellm-router/internal/upstream"
 )
 
 // Handler dispatches Anthropic API requests to providers.
@@ -24,18 +26,31 @@ type Handler struct {
 	DirectClient *http.Client // requests without proxy
 	Logger       *slog.Logger
 	Catalog      *catalog.Service
+	Upstream     *upstream.Executor
 }
 
 // NewHandler creates a proxy Handler.
-func NewHandler(resolver *router.Resolver, proxyClient, directClient *http.Client, logger *slog.Logger) *Handler {
+func NewHandler(resolver *router.Resolver, proxyClient, directClient *http.Client, logger *slog.Logger, executors ...*upstream.Executor) *Handler {
 	handler := &Handler{
 		Resolver:     resolver,
 		ProxyClient:  proxyClient,
 		DirectClient: directClient,
 		Logger:       logger,
 	}
+	if len(executors) > 0 {
+		handler.Upstream = executors[0]
+	}
 	handler.Catalog = catalog.New(handler.clientFor)
 	return handler
+}
+
+func (h *Handler) upstreamExecutor() *upstream.Executor {
+	if h.Upstream == nil {
+		policy := config.DefaultConfig().Retry
+		policy.Enabled = false
+		return upstream.NewExecutor(policy)
+	}
+	return h.Upstream
 }
 
 func (h *Handler) clientFor(p *router.Provider) *http.Client {
@@ -105,63 +120,70 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 
 	reqBody, _ := json.Marshal(body)
 	timeout := externalRequestTimeout()
+	mode := upstream.Buffered
+	successBodyLimit := int64(1 << 20)
 	if body.Stream {
 		timeout = externalStreamTimeout()
+		mode = upstream.Headers
+		successBodyLimit = 0
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "create request: "+err.Error())
+	sanitizer := upstream.NewSanitizer(apiKey)
+	result, failure := h.upstreamExecutor().Do(
+		r.Context(),
+		h.clientFor(resolved.Provider),
+		upstream.Metadata{
+			RequestID: onellmLog.RequestIDFromContext(r.Context()),
+			Provider:  resolved.Provider.Prefix,
+			Model:     resolved.Model,
+			Endpoint:  string(router.EndpointAnthropic),
+		},
+		upstream.Options{
+			Mode:              mode,
+			PerAttemptTimeout: timeout,
+			SuccessBodyLimit:  successBodyLimit,
+			Sanitizer:         sanitizer,
+		},
+		func(ctx context.Context) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("x-api-key", apiKey)
+			if body.Stream {
+				req.Header.Set("Accept", "text/event-stream")
+			}
+			return req, nil
+		},
+	)
+	if failure != nil {
+		if failure.Kind == upstream.FailureClientCancel || failure.Kind == upstream.FailureServiceShutdown {
+			return
+		}
+		if failure.Kind == upstream.FailureLocal {
+			h.writeError(w, http.StatusInternalServerError, "create request: "+sanitizer.Sanitize([]byte(failure.Err.Error())))
+			return
+		}
+		writeAnthropicUpstreamError(w, resolved.Provider.Prefix, failure)
 		return
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-
 	if !body.Stream {
-		resp, err := h.clientFor(resolved.Provider).Do(req)
-		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				h.writeError(w, http.StatusBadGateway, "timeout waiting for upstream response")
-				return
-			}
-			h.writeError(w, http.StatusBadGateway, "external api: "+err.Error())
-			return
-		}
-		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		if resp.StatusCode >= 400 {
-			h.writeError(w, resp.StatusCode, string(respBody))
-			return
-		}
-
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(respBody)
+		_, _ = w.Write(result.Body)
 		return
 	}
 
 	// Streaming — direct SSE passthrough
-	resp, err := h.clientFor(resolved.Provider).Do(req)
-	if err != nil {
-		h.writeError(w, http.StatusBadGateway, "external api stream: "+err.Error())
-		return
-	}
+	resp := result.Response
 	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		h.writeError(w, resp.StatusCode, string(respBody))
-		return
-	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 
 	flusher, _ := w.(http.Flusher)
-	err = streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
+	err := streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
 		if _, err := io.WriteString(w, line); err != nil {
 			return err
 		}
@@ -292,60 +314,68 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 	body.Model = strings.TrimSuffix(body.Model, "[1m]")
 
 	reqBody, _ := json.Marshal(body)
-	ctx, cancel := context.WithTimeout(r.Context(), openAIRequestTimeout())
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "create request: "+err.Error())
+	sanitizer := upstream.NewSanitizer(resolved.Provider.APIKey)
+	mode := upstream.Buffered
+	if body.Stream {
+		mode = upstream.Headers
+	}
+	result, failure := h.upstreamExecutor().Do(
+		r.Context(),
+		client,
+		upstream.Metadata{
+			RequestID: onellmLog.RequestIDFromContext(r.Context()),
+			Provider:  resolved.Provider.Prefix,
+			Model:     body.Model,
+			Endpoint:  string(router.EndpointOpenAI),
+		},
+		upstream.Options{
+			Mode:              mode,
+			PerAttemptTimeout: openAIRequestTimeout(),
+			SuccessBodyLimit:  0,
+			Sanitizer:         sanitizer,
+		},
+		func(ctx context.Context) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+resolved.Provider.APIKey)
+			if body.Stream {
+				req.Header.Set("Accept", "text/event-stream")
+			}
+			return req, nil
+		},
+	)
+	if failure != nil {
+		if failure.Kind == upstream.FailureClientCancel || failure.Kind == upstream.FailureServiceShutdown {
+			return
+		}
+		if failure.Kind == upstream.FailureLocal {
+			h.writeError(w, http.StatusInternalServerError, "create request: "+sanitizer.Sanitize([]byte(failure.Err.Error())))
+			return
+		}
+		writeOpenAIUpstreamError(w, resolved.Provider.Prefix, failure)
 		return
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+resolved.Provider.APIKey)
-
 	if !body.Stream {
-		resp, err := client.Do(req)
-		if err != nil {
-			h.writeError(w, http.StatusBadGateway, "upstream: "+err.Error())
-			return
-		}
-		defer resp.Body.Close()
-		respBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			h.Logger.Warn("read response body", "error", err)
-			h.writeError(w, http.StatusBadGateway, "read response failed: "+err.Error())
-			return
-		}
-		if resp.StatusCode >= 400 {
-			h.writeError(w, resp.StatusCode, string(respBody))
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(respBody)
+		_, _ = w.Write(result.Body)
 		return
 	}
 
 	// Streaming: byte-for-byte SSE passthrough
-	req.Header.Set("Accept", "text/event-stream")
-	resp, err := client.Do(req)
-	if err != nil {
-		h.writeError(w, http.StatusBadGateway, "upstream stream: "+err.Error())
-		return
-	}
+	resp := result.Response
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		h.writeError(w, resp.StatusCode, string(respBody))
-		return
-	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
-	err = streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
+	err := streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
 		if _, err := io.WriteString(w, line); err != nil {
 			return err
 		}
@@ -375,40 +405,55 @@ func (h *Handler) openaiTranslateHandler(w http.ResponseWriter, r *http.Request,
 	apiKey := resolved.Provider.APIKey
 
 	reqBody, _ := json.Marshal(anthropicReq)
-	ctx, cancel := context.WithTimeout(r.Context(), openAIRequestTimeout())
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "create request: "+err.Error())
+	client := h.clientFor(resolved.Provider)
+	sanitizer := upstream.NewSanitizer(apiKey)
+	mode := upstream.Buffered
+	if body.Stream {
+		mode = upstream.Headers
+	}
+	result, failure := h.upstreamExecutor().Do(
+		r.Context(),
+		client,
+		upstream.Metadata{
+			RequestID: onellmLog.RequestIDFromContext(r.Context()),
+			Provider:  resolved.Provider.Prefix,
+			Model:     body.Model,
+			Endpoint:  string(router.EndpointAnthropic),
+		},
+		upstream.Options{
+			Mode:              mode,
+			PerAttemptTimeout: openAIRequestTimeout(),
+			SuccessBodyLimit:  0,
+			Sanitizer:         sanitizer,
+		},
+		func(ctx context.Context) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("x-api-key", apiKey)
+			if body.Stream {
+				req.Header.Set("Accept", "text/event-stream")
+			}
+			return req, nil
+		},
+	)
+	if failure != nil {
+		if failure.Kind == upstream.FailureClientCancel || failure.Kind == upstream.FailureServiceShutdown {
+			return
+		}
+		if failure.Kind == upstream.FailureLocal {
+			h.writeError(w, http.StatusInternalServerError, "create request: "+sanitizer.Sanitize([]byte(failure.Err.Error())))
+			return
+		}
+		writeOpenAIUpstreamError(w, resolved.Provider.Prefix, failure)
 		return
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-
-	client := h.clientFor(resolved.Provider)
-
 	if !body.Stream {
-		resp, err := client.Do(req)
-		if err != nil {
-			h.writeError(w, http.StatusBadGateway, "external api: "+err.Error())
-			return
-		}
-		defer resp.Body.Close()
-
-		respBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			h.Logger.Warn("read response body", "error", err)
-			h.writeError(w, http.StatusBadGateway, "read response failed: "+err.Error())
-			return
-		}
-		if resp.StatusCode >= 400 {
-			h.writeError(w, resp.StatusCode, string(respBody))
-			return
-		}
-
 		var anthropicResp translate.AnthropicResponse
-		if err := json.Unmarshal(respBody, &anthropicResp); err != nil {
+		if err := json.Unmarshal(result.Body, &anthropicResp); err != nil {
 			h.writeError(w, http.StatusInternalServerError, "parse response: "+err.Error())
 			return
 		}
@@ -418,19 +463,8 @@ func (h *Handler) openaiTranslateHandler(w http.ResponseWriter, r *http.Request,
 	}
 
 	// Streaming: Anthropic SSE passthrough
-	req.Header.Set("Accept", "text/event-stream")
-	resp, err := client.Do(req)
-	if err != nil {
-		h.writeError(w, http.StatusBadGateway, "external api: "+err.Error())
-		return
-	}
+	resp := result.Response
 	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		h.writeError(w, resp.StatusCode, string(respBody))
-		return
-	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -503,64 +537,72 @@ func (h *Handler) ServeResponses(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request, rawBody []byte, stream bool, resolved *router.ResolveResult) {
 	url := strings.TrimRight(resolved.Provider.ResponsesBaseURL, "/") + "/v1/responses"
 	client := h.clientFor(resolved.Provider)
-	requestContext := r.Context()
-	cancel := func() {}
-	if !stream {
-		requestContext, cancel = context.WithTimeout(r.Context(), openAIRequestTimeout())
-	}
-	defer cancel()
+	sanitizer := upstream.NewSanitizer(resolved.Provider.APIKey)
 	meta := onellmLog.RequestMetaFromContext(r.Context())
-	req, err := http.NewRequestWithContext(requestContext, "POST", url, bytes.NewReader(rawBody))
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "create request: "+err.Error())
+	mode := upstream.Buffered
+	if stream {
+		mode = upstream.Headers
+	}
+	meta.UpstreamStage = "headers"
+	result, failure := h.upstreamExecutor().Do(
+		r.Context(),
+		client,
+		upstream.Metadata{
+			RequestID: onellmLog.RequestIDFromContext(r.Context()),
+			Provider:  resolved.Provider.Prefix,
+			Model:     resolved.Model,
+			Endpoint:  string(router.EndpointResponses),
+		},
+		upstream.Options{
+			Mode:              mode,
+			PerAttemptTimeout: openAIRequestTimeout(),
+			SuccessBodyLimit:  0,
+			Sanitizer:         sanitizer,
+		},
+		func(ctx context.Context) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawBody))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+resolved.Provider.APIKey)
+			if stream {
+				req.Header.Set("Accept", "text/event-stream")
+			}
+			return req, nil
+		},
+	)
+	if failure != nil {
+		meta.UpstreamStatus = failure.StatusCode
+		if failure.Kind == upstream.FailureClientCancel {
+			meta.EndReason = "client_cancel"
+			return
+		}
+		if failure.Kind == upstream.FailureServiceShutdown {
+			meta.EndReason = "service_shutdown"
+			return
+		}
+		meta.EndReason = "upstream_error"
+		if failure.Kind == upstream.FailureLocal {
+			h.writeError(w, http.StatusInternalServerError, "create request: "+sanitizer.Sanitize([]byte(failure.Err.Error())))
+			return
+		}
+		writeOpenAIUpstreamError(w, resolved.Provider.Prefix, failure)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+resolved.Provider.APIKey)
+
+	meta.UpstreamStatus = result.Response.StatusCode
 	if !stream {
-		meta.UpstreamStage = "headers"
-		resp, err := client.Do(req)
-		if err != nil {
-			meta.EndReason = "upstream_error"
-			h.writeError(w, http.StatusBadGateway, "headers: "+err.Error())
-			return
-		}
-		defer resp.Body.Close()
-		meta.UpstreamStatus = resp.StatusCode
 		meta.UpstreamStage = "body"
-		respBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			meta.EndReason = "upstream_error"
-			h.writeError(w, http.StatusBadGateway, "read response failed: "+err.Error())
-			return
-		}
-		if resp.StatusCode >= 400 {
-			meta.EndReason = "upstream_error"
-			h.writeError(w, resp.StatusCode, string(respBody))
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(respBody)
+		_, _ = w.Write(result.Body)
 		meta.EndReason = "ok"
 		return
 	}
-	req.Header.Set("Accept", "text/event-stream")
-	meta.UpstreamStage = "headers"
-	resp, err := client.Do(req)
-	if err != nil {
-		meta.EndReason = "upstream_error"
-		h.writeError(w, http.StatusBadGateway, "headers: "+err.Error())
-		return
-	}
+
+	resp := result.Response
 	defer resp.Body.Close()
-	meta.UpstreamStatus = resp.StatusCode
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		meta.EndReason = "upstream_error"
-		h.writeError(w, resp.StatusCode, string(respBody))
-		return
-	}
 	for key, values := range resp.Header {
 		for _, value := range values {
 			w.Header().Add(key, value)
@@ -572,11 +614,13 @@ func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request,
 
 	flusher, _ := w.(http.Flusher)
 	meta.UpstreamStage = "stream"
-	_, err = io.Copy(flushWriter{writer: w, flusher: flusher, meta: meta}, resp.Body)
+	_, err := io.Copy(flushWriter{writer: w, flusher: flusher, meta: meta}, resp.Body)
 	meta.MarkStreamFinish()
 	if err != nil {
 		meta.Error = err.Error()
-		if r.Context().Err() != nil {
+		if errors.Is(context.Cause(r.Context()), upstream.ErrServiceShutdown) {
+			meta.EndReason = "service_shutdown"
+		} else if r.Context().Err() != nil {
 			meta.EndReason = "client_cancel"
 		} else {
 			meta.EndReason = "upstream_error"

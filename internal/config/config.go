@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,6 +16,7 @@ type Config struct {
 	Server     ServerConfig     `yaml:"server"`
 	Log        LogConfig        `yaml:"log"`
 	Proxy      ProxyConfig      `yaml:"proxy"`
+	Retry      RetryConfig      `yaml:"retry"`
 	Codex      CodexConfig      `yaml:"codex"`
 	Providers  []ProviderConfig `yaml:"providers"`
 	ModelSlots ModelSlotsConfig `yaml:"model_slots"`
@@ -36,6 +39,32 @@ type LogConfig struct {
 // ProxyConfig holds proxy settings for outbound requests.
 type ProxyConfig struct {
 	Socks5 string `yaml:"socks5"`
+}
+
+// Duration is a time.Duration decoded from a YAML string.
+type Duration time.Duration
+
+func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+		return fmt.Errorf("duration must be a Go duration string, got %s", node.ShortTag())
+	}
+	parsed, err := time.ParseDuration(node.Value)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q: %w", node.Value, err)
+	}
+	*d = Duration(parsed)
+	return nil
+}
+
+// RetryConfig holds the global upstream retry settings.
+type RetryConfig struct {
+	Enabled         bool     `yaml:"enabled"`
+	MaxAttempts     int      `yaml:"max_attempts"`
+	InitialDelay    Duration `yaml:"initial_delay"`
+	MaxDelay        Duration `yaml:"max_delay"`
+	MaxElapsed      Duration `yaml:"max_elapsed"`
+	Jitter          float64  `yaml:"jitter"`
+	HonorRetryAfter bool     `yaml:"honor_retry_after"`
 }
 
 type CodexConfig struct {
@@ -84,6 +113,15 @@ func DefaultConfig() *Config {
 		Proxy: ProxyConfig{
 			Socks5: "127.0.0.1:1082",
 		},
+		Retry: RetryConfig{
+			Enabled:         true,
+			MaxAttempts:     15,
+			InitialDelay:    Duration(time.Second),
+			MaxDelay:        Duration(30 * time.Second),
+			MaxElapsed:      Duration(5 * time.Minute),
+			Jitter:          0.2,
+			HonorRetryAfter: true,
+		},
 		Codex: CodexConfig{
 			OverwriteCatalog: true,
 			Models: map[string]CodexModelConfig{
@@ -130,6 +168,22 @@ func Load(path string) (*Config, error) {
 
 // Validate checks the config for correctness.
 func (c *Config) Validate() error {
+	if c.Retry.MaxAttempts < 1 {
+		return fmt.Errorf("retry.max_attempts must be at least 1")
+	}
+	if c.Retry.InitialDelay <= 0 {
+		return fmt.Errorf("retry.initial_delay must be greater than 0")
+	}
+	if c.Retry.MaxDelay < c.Retry.InitialDelay {
+		return fmt.Errorf("retry.max_delay must be greater than or equal to retry.initial_delay")
+	}
+	if c.Retry.MaxElapsed <= 0 {
+		return fmt.Errorf("retry.max_elapsed must be greater than 0")
+	}
+	if math.IsNaN(c.Retry.Jitter) || c.Retry.Jitter < 0 || c.Retry.Jitter > 1 {
+		return fmt.Errorf("retry.jitter must be between 0 and 1")
+	}
+
 	if len(c.Providers) == 0 {
 		return fmt.Errorf("至少需要一个 provider（在 providers: 下配置）")
 	}

@@ -22,4 +22,3 @@ gateway for Anthropic, OpenAI Chat Completions, and OpenAI Responses providers.
 - A provider without an endpoint, regardless of prefix, fails validation.
 - Generic Anthropic, OpenAI, Responses, catalog, desktop, and build tests pass.
 - Current configuration and user documentation contain no Copilot support.
-

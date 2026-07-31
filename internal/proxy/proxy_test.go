@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kkroid/onellm-router/internal/config"
 	"github.com/kkroid/onellm-router/internal/router"
+	"github.com/kkroid/onellm-router/internal/upstream"
 )
 
 // ==================== Test helpers ====================
@@ -173,6 +175,249 @@ func TestHandler_CPPrefixUsesConfiguredAnthropicEndpoint(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAnthropicNonStreamRetriesWithRebuiltRequest(t *testing.T) {
+	var calls int
+	var requestBodies []string
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requestBodies = append(requestBodies, string(body))
+		if r.Header.Get("x-api-key") != "provider-secret" || r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("attempt %d headers = %v", calls, r.Header)
+		}
+		if calls == 1 {
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, "temporary", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, "{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"m1\",\"content\":[{\"type\":\"text\",\"text\":\"recovered\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}")
+	}))
+	defer mockAPI.Close()
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "provider-secret", Models: []string{"m1"},
+	}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{\"model\":\"ds/m1\",\"max_tokens\":5,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "recovered") {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if calls != 2 || len(requestBodies) != 2 || requestBodies[0] != requestBodies[1] {
+		t.Fatalf("calls = %d, request bodies = %#v", calls, requestBodies)
+	}
+	if strings.Contains(requestBodies[0], "ds/m1") || !strings.Contains(requestBodies[0], `"model":"m1"`) {
+		t.Fatalf("model was not rewritten once before retries: %s", requestBodies[0])
+	}
+}
+
+func TestAnthropicNonStreamBodyLimitBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		size       int
+		wantStatus int
+	}{
+		{name: "exact limit", size: 1 << 20, wantStatus: http.StatusOK},
+		{name: "over limit", size: (1 << 20) + 1, wantStatus: http.StatusBadGateway},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var calls int
+			payload := strings.Repeat("x", test.size)
+			mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, payload)
+			}))
+			defer mockAPI.Close()
+			resolver := router.NewResolver([]router.Provider{{
+				Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"},
+			}})
+			handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(3))
+			request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"messages":[]}`))
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, test.wantStatus)
+			}
+			if calls != 1 {
+				t.Fatalf("upstream calls = %d, want 1", calls)
+			}
+			if test.wantStatus == http.StatusOK && recorder.Body.Len() != test.size {
+				t.Fatalf("body length = %d, want %d", recorder.Body.Len(), test.size)
+			}
+		})
+	}
+}
+
+func TestAnthropicRetriesAllNon2xxStatuses(t *testing.T) {
+	statuses := []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusBadGateway, http.StatusOK}
+	var calls int
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		status := statuses[calls]
+		calls++
+		w.WriteHeader(status)
+		if status == http.StatusOK {
+			io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"m1","content":[],"stop_reason":"end_turn","usage":{}}`)
+		}
+	}))
+	defer mockAPI.Close()
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"},
+	}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(4))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 4 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+}
+
+func TestAnthropicFinalFailureUsesSafeProtocolError(t *testing.T) {
+	const secret = "provider-secret"
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, `{"x-api-key":"provider-secret","message":"denied"}`)
+	}))
+	defer mockAPI.Close()
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", BaseURL: mockAPI.URL, APIKey: secret, Models: []string{"m1"},
+	}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), "upstream request failed") {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), secret) || recorder.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("unsafe final response: headers=%v body=%s", recorder.Header(), recorder.Body.String())
+	}
+}
+
+func TestAnthropicStreamRetriesBeforeSuccessfulHeaders(t *testing.T) {
+	var calls int
+	var acceptHeaders []string
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		acceptHeaders = append(acceptHeaders, r.Header.Get("Accept"))
+		if calls == 1 {
+			http.Error(w, "temporary", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\"}\n\n")
+	}))
+	defer mockAPI.Close()
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"},
+	}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"stream":true,"messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 2 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+	if len(acceptHeaders) != 2 || acceptHeaders[0] != "text/event-stream" || acceptHeaders[1] != "text/event-stream" {
+		t.Fatalf("Accept headers = %#v", acceptHeaders)
+	}
+	if counts := parseSSEEvents(recorder.Body.String()); counts["message_start"] != 1 {
+		t.Fatalf("SSE events = %v, body = %s", counts, recorder.Body.String())
+	}
+}
+
+func TestAnthropicTransportFailureRecovers(t *testing.T) {
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return nil, context.DeadlineExceeded
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"m1","content":[],"stop_reason":"end_turn","usage":{}}`)),
+			Request:    request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", BaseURL: "http://unused", APIKey: "secret", Models: []string{"m1"},
+	}})
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 2 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+}
+
+func TestAnthropicRequestFactoryErrorsStayLocal(t *testing.T) {
+	const secret = "provider-secret"
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", BaseURL: "://" + secret, APIKey: secret, Models: []string{"m1"},
+	}})
+	handler := NewHandler(resolver, http.DefaultClient, http.DefaultClient, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "upstream_retry_exhausted") {
+		t.Fatalf("local request error was reported as exhausted upstream retry: %s", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), secret) {
+		t.Fatalf("local request error leaked provider secret: %s", recorder.Body.String())
+	}
+}
+
+func TestAnthropicAcceptedStreamFailureDoesNotRetry(t *testing.T) {
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(&dataThenErrorReader{
+				data: []byte("event: message_start\ndata: {\"type\":\"message_start\"}\n\n"),
+			}),
+			Request: request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", BaseURL: "http://unused", APIKey: "secret", Models: []string{"m1"},
+	}})
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"stream":true,"messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 1 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
 	}
 }
 
@@ -360,17 +605,8 @@ func TestHandler_ContextCancel(t *testing.T) {
 func TestExternalRequestUsesTimeoutOverride(t *testing.T) {
 	t.Setenv("ONELLM_EXTERNAL_REQUEST_TIMEOUT_MS", "25")
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		deadline, ok := request.Context().Deadline()
-		if !ok || time.Until(deadline) > 500*time.Millisecond {
-			return nil, context.DeadlineExceeded
-		}
-		body := `{"id":"msg_1","type":"message","role":"assistant","model":"m1","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(body)),
-			Request:    request,
-		}, nil
+		<-request.Context().Done()
+		return nil, request.Context().Err()
 	})}
 	resolver := router.NewResolver([]router.Provider{{
 		Prefix: "ds", BaseURL: "http://unused", Models: []string{"m1"},
@@ -378,11 +614,15 @@ func TestExternalRequestUsesTimeoutOverride(t *testing.T) {
 	handler := &Handler{Resolver: resolver, ProxyClient: client, DirectClient: client, Logger: slog.New(slog.DiscardHandler)}
 	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`))
 	recorder := httptest.NewRecorder()
+	started := time.Now()
 
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
+	if recorder.Code != http.StatusGatewayTimeout {
 		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("timeout override took %s", elapsed)
 	}
 }
 
@@ -424,4 +664,15 @@ func TestExternalStreamUsesFirstEventTimeoutOverride(t *testing.T) {
 	if recorder.Body.Len() != 0 {
 		t.Fatalf("unexpected stalled-stream output: %q", recorder.Body.String())
 	}
+}
+
+func newRetryTestExecutor(maxAttempts int) *upstream.Executor {
+	return upstream.NewExecutor(config.RetryConfig{
+		Enabled:         true,
+		MaxAttempts:     maxAttempts,
+		InitialDelay:    config.Duration(time.Nanosecond),
+		MaxDelay:        config.Duration(time.Nanosecond),
+		MaxElapsed:      config.Duration(time.Second),
+		HonorRetryAfter: true,
+	})
 }

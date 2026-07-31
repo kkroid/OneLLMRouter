@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	onellmLog "github.com/kkroid/onellm-router/internal/log"
 	"github.com/kkroid/onellm-router/internal/router"
+	"github.com/kkroid/onellm-router/internal/upstream"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -23,6 +25,21 @@ func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, 
 type dataThenErrorReader struct {
 	data []byte
 	done bool
+}
+
+type cancelThenErrorReader struct {
+	cancel context.CancelCauseFunc
+	data   []byte
+	done   bool
+}
+
+func (reader *cancelThenErrorReader) Read(buffer []byte) (int, error) {
+	if reader.done {
+		reader.cancel(upstream.ErrServiceShutdown)
+		return 0, errors.New("stream interrupted by service shutdown")
+	}
+	reader.done = true
+	return copy(buffer, reader.data), nil
 }
 
 func (reader *dataThenErrorReader) Read(buffer []byte) (int, error) {
@@ -215,6 +232,35 @@ func TestResponses_DirectStreamReadErrorIsNotSuccess(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamServiceShutdownKeepsShutdownCause(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(&cancelThenErrorReader{
+				cancel: cancel,
+				data:   []byte("data: partial\n\n"),
+			}),
+			Request: request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "oai", ResponsesBaseURL: "http://unused", APIKey: "secret", Models: []string{"gpt-5"},
+	}})
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	meta := &onellmLog.RequestMeta{}
+	ctx = onellmLog.WithRequestMeta(ctx, meta)
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","input":"hi","stream":true}`)).WithContext(ctx)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if meta.EndReason != "service_shutdown" {
+		t.Fatalf("end reason = %q, want service_shutdown", meta.EndReason)
+	}
+}
+
 func TestResponses_DirectStreamHasNoFixedDeadline(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if _, hasDeadline := request.Context().Deadline(); hasDeadline {
@@ -282,5 +328,206 @@ func TestResponses_UnknownModel(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "unknown model") {
 		t.Errorf("expected unknown model error, got %s", w.Body.String())
+	}
+}
+
+func TestResponsesRetriesWithRebuiltRequest(t *testing.T) {
+	var calls int
+	var requestBodies []string
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requestBodies = append(requestBodies, string(body))
+		if got := r.Header.Get("Authorization"); got != "Bearer provider-secret" {
+			t.Errorf("attempt %d Authorization = %q", calls, got)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("attempt %d Content-Type = %q", calls, got)
+		}
+		if calls == 1 {
+			w.Header().Set("X-Failed-Attempt", "must-not-leak")
+			http.Error(w, "temporary", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"resp_recovered","object":"response","output":[]}`)
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "c78", ResponsesBaseURL: mockAPI.URL, APIKey: "provider-secret",
+	}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"c78/gpt-5.6-sol","input":"hi"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 2 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+	if len(requestBodies) != 2 || requestBodies[0] != requestBodies[1] {
+		t.Fatalf("request bodies = %#v", requestBodies)
+	}
+	if strings.Contains(requestBodies[0], "c78/") || !strings.Contains(requestBodies[0], `"model":"gpt-5.6-sol"`) {
+		t.Fatalf("provider prefix was not stripped before retries: %s", requestBodies[0])
+	}
+	if recorder.Header().Get("X-Failed-Attempt") != "" {
+		t.Fatalf("response headers = %v", recorder.Header())
+	}
+}
+
+func TestResponsesRetriesRedirectWithoutFollowing(t *testing.T) {
+	var responseCalls int
+	var redirectedCalls int
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirected" {
+			redirectedCalls++
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		responseCalls++
+		if responseCalls == 1 {
+			w.Header().Set("Location", "/redirected")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+			return
+		}
+		io.WriteString(w, `{"id":"resp_ok","object":"response","output":[]}`)
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{Prefix: "oai", ResponsesBaseURL: mockAPI.URL, Models: []string{"gpt-5"}}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","input":"hi"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK || responseCalls != 2 || redirectedCalls != 0 {
+		t.Fatalf("status = %d, response calls = %d, redirected calls = %d", recorder.Code, responseCalls, redirectedCalls)
+	}
+}
+
+func TestResponsesRetriesBufferedBodyReadFailure(t *testing.T) {
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		var body io.ReadCloser = io.NopCloser(strings.NewReader(`{"id":"resp_ok","object":"response","output":[]}`))
+		if calls == 1 {
+			body = io.NopCloser(&dataThenErrorReader{data: []byte(`{"id":"partial"`)})
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       body,
+			Request:    request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{Prefix: "oai", ResponsesBaseURL: "http://unused", Models: []string{"gpt-5"}}})
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","input":"hi"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 2 || !strings.Contains(recorder.Body.String(), "resp_ok") {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+}
+
+func TestResponsesStreamRetriesOnlyBeforeSuccessfulHeaders(t *testing.T) {
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.Header.Get("Accept") != "text/event-stream" {
+			t.Errorf("attempt %d Accept = %q", calls, request.Header.Get("Accept"))
+		}
+		if calls == 1 {
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     http.Header{"X-Failed-Attempt": []string{"must-not-leak"}},
+				Body:       io.NopCloser(strings.NewReader("temporary")),
+				Request:    request,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Upstream-Success": []string{"preserved"}},
+			Body:       io.NopCloser(&dataThenErrorReader{data: []byte("data: partial\n\n")}),
+			Request:    request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{Prefix: "oai", ResponsesBaseURL: "http://unused", Models: []string{"gpt-5"}}})
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(3))
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","input":"hi","stream":true}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 2 || recorder.Body.String() != "data: partial\n\n" {
+		t.Fatalf("status = %d, calls = %d, body = %q", recorder.Code, calls, recorder.Body.String())
+	}
+	if recorder.Header().Get("X-Failed-Attempt") != "" || recorder.Header().Get("X-Upstream-Success") != "preserved" {
+		t.Fatalf("response headers = %v", recorder.Header())
+	}
+}
+
+func TestResponsesPersistentFailureUsesOpenAIError(t *testing.T) {
+	const secret = "provider-secret"
+	var calls int
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, `{"authorization":"Bearer provider-secret","message":"denied"}`)
+	}))
+	defer mockAPI.Close()
+	resolver := router.NewResolver([]router.Provider{{Prefix: "oai", ResponsesBaseURL: mockAPI.URL, APIKey: secret, Models: []string{"gpt-5"}}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","input":"hi"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusForbidden || calls != 2 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+	var payload struct {
+		Error struct {
+			Message string  `json:"message"`
+			Type    string  `json:"type"`
+			Param   *string `json:"param"`
+			Code    string  `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Type != "upstream_error" || payload.Error.Param != nil || payload.Error.Code != "upstream_retry_exhausted" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if strings.Contains(recorder.Body.String(), secret) || !strings.Contains(payload.Error.Message, "Attempts: 2") {
+		t.Fatalf("unsafe or incomplete error: %s", recorder.Body.String())
+	}
+}
+
+func TestResponsesRequestFactoryErrorsStayLocalAndSafe(t *testing.T) {
+	const secret = "provider-secret"
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "oai", ResponsesBaseURL: "://" + secret, APIKey: secret, Models: []string{"gpt-5"},
+	}})
+	handler := NewHandler(resolver, http.DefaultClient, http.DefaultClient, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","input":"hi"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), secret) || strings.Contains(recorder.Body.String(), "upstream_retry_exhausted") {
+		t.Fatalf("unsafe local request error: %s", recorder.Body.String())
 	}
 }

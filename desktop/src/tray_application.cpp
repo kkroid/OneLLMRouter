@@ -237,7 +237,8 @@ void TrayApplication::startOwned()
 
 void TrayApplication::stopOwned()
 {
-    if (m_process.requestGracefulStop()) m_autoStartAllowed = false;
+    m_autoStartAllowed = false;
+    m_process.requestGracefulStop();
 }
 
 void TrayApplication::setState(RouterState state, const QString &detail)

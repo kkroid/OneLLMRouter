@@ -22,21 +22,25 @@ const (
 
 // RequestMeta holds per-request metadata for logging.
 type RequestMeta struct {
-	Model           string
-	Stream          bool
-	TTFBMs          int64  // time to first byte in ms (relative)
-	FirstEventMs    int64  // time to first upstream stream event in ms
-	LastEventAgeMs  int64  // idle time since last upstream stream event at finish
-	Provider        string // "cp" or "ds"
-	Error           string // non-empty = request failed
-	MaxTokens       int    // from request body, for debugging
-	UpstreamStage   string // headers, body, stream
-	UpstreamStatus  int
-	SSEEvents       int
-	BytesOut        int64
-	EndReason       string // ok, upstream_timeout, stream_idle_timeout, client_cancel, upstream_error
-	start           time.Time
-	lastStreamEvent time.Time
+	Model              string
+	Stream             bool
+	TTFBMs             int64 // time to first byte in ms (relative)
+	FirstEventMs       int64 // time to first upstream stream event in ms
+	LastEventAgeMs     int64 // idle time since last upstream stream event at finish
+	Provider           string
+	Error              string // non-empty = request failed
+	MaxTokens          int    // from request body, for debugging
+	UpstreamStage      string // headers, body, stream
+	UpstreamStatus     int
+	UpstreamAttempts   int
+	RetryElapsedMs     int64
+	LastUpstreamStatus int
+	LastFailureKind    string
+	SSEEvents          int
+	BytesOut           int64
+	EndReason          string // ok, upstream_timeout, stream_idle_timeout, client_cancel, upstream_error
+	start              time.Time
+	lastStreamEvent    time.Time
 }
 
 // MarkStart records the request start time for TTFB calculation.

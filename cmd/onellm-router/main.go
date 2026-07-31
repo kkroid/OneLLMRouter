@@ -25,6 +25,7 @@ import (
 
 	"github.com/kkroid/onellm-router/internal/proxy"
 	"github.com/kkroid/onellm-router/internal/router"
+	"github.com/kkroid/onellm-router/internal/upstream"
 	"github.com/spf13/cobra"
 )
 
@@ -141,7 +142,8 @@ func serveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create direct client: %w", err)
 			}
-			proxyHandler := proxy.NewHandler(resolver, httpClient, directClient, logger)
+			retryExecutor := upstream.NewExecutor(cfg.Retry, logger)
+			proxyHandler := proxy.NewHandler(resolver, httpClient, directClient, logger, retryExecutor)
 			proxyHandler.Catalog.SetReasoningMappings(codexReasoningMappings(cfg.Codex.Models))
 
 			logger.Info("onellm-router starting",
@@ -172,7 +174,9 @@ func serveCmd() *cobra.Command {
 			mux := http.NewServeMux()
 			registerRoutes(mux, resolver, proxyHandler, cfg, selectedConfigPath, logger)
 
-			httpServer := &http.Server{Handler: withRequestID(mux, logger)}
+			serviceContext, cancelService := context.WithCancelCause(context.Background())
+			defer cancelService(nil)
+			httpServer := newHTTPServer(withRequestID(mux, logger), serviceContext)
 			serverErrCh := make(chan error, 1)
 
 			go func() {
@@ -185,7 +189,7 @@ func serveCmd() *cobra.Command {
 				logger.Error("resolve user home for Codex catalog", "error", err)
 			} else {
 				options := codexCatalogOptions(userHome, cfg.Codex.OverwriteCatalog)
-				go generateCodexCatalog(cmd.Context(), proxyHandler.Catalog, providers, options, logger)
+				go generateCodexCatalog(serviceContext, proxyHandler.Catalog, providers, options, logger)
 			}
 
 			// Shutdown coordination: Qt tray child control or signal
@@ -197,16 +201,13 @@ func serveCmd() *cobra.Command {
 				go watchTrayControl(os.Stdin, stop)
 			}
 
-			go func() {
-				sigCh := make(chan os.Signal, 1)
-				signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-				<-sigCh
-				stop()
-			}()
+			signalContext, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stopSignals()
 
 			var serveErr error
 			select {
 			case <-doneCh:
+			case <-signalContext.Done():
 			case err := <-serverErrCh:
 				if err != nil && !errors.Is(err, http.ErrServerClosed) {
 					serveErr = err
@@ -217,7 +218,7 @@ func serveCmd() *cobra.Command {
 
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			if err := shutdownHTTPServer(shutdownCtx, httpServer, cancelService); err != nil {
 				logger.Error("HTTP shutdown error", "error", err)
 			}
 
@@ -228,6 +229,20 @@ func serveCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newHTTPServer(handler http.Handler, baseContext context.Context) *http.Server {
+	return &http.Server{
+		Handler: handler,
+		BaseContext: func(net.Listener) context.Context {
+			return baseContext
+		},
+	}
+}
+
+func shutdownHTTPServer(ctx context.Context, server *http.Server, cancelService context.CancelCauseFunc) error {
+	cancelService(upstream.ErrServiceShutdown)
+	return server.Shutdown(ctx)
 }
 
 func statusCmd() *cobra.Command {
@@ -403,6 +418,18 @@ func withRequestID(next http.Handler, logger *slog.Logger) http.Handler {
 		}
 		if meta.UpstreamStatus > 0 {
 			attrs = append(attrs, "upstream_status", meta.UpstreamStatus)
+		}
+		if meta.UpstreamAttempts > 0 {
+			attrs = append(attrs,
+				"upstream_attempts", meta.UpstreamAttempts,
+				"retry_elapsed_ms", meta.RetryElapsedMs,
+			)
+		}
+		if meta.LastUpstreamStatus > 0 {
+			attrs = append(attrs, "last_upstream_status", meta.LastUpstreamStatus)
+		}
+		if meta.LastFailureKind != "" {
+			attrs = append(attrs, "last_failure_kind", meta.LastFailureKind)
 		}
 		if meta.SSEEvents > 0 {
 			attrs = append(attrs, "sse_events", meta.SSEEvents)
