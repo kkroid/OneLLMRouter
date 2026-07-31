@@ -1,4 +1,6 @@
 #include <QtTest>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTcpServer>
 #include <QTcpSocket>
 
@@ -15,12 +17,14 @@ private slots:
     void rejectsUnknownConfigFields();
     void rejectsMalformedConfigInfo();
     void parsesExpectedRouterHealth();
+    void matchesHealthToSelectedConfig();
     void rejectsWrongHealthIdentity();
     void classifiesExternalConflictAndAbsent();
     void redirectIsConflict();
     void closedDynamicPortIsAbsent();
     void configInfoTimeoutReportsFailure();
     void configInfoTimeoutCanRetryAfterProcessFinishes();
+    void samePortDifferentConfigIsConflict();
     void overlappingDiscoveryDoesNotCreateSecondProbe();
 };
 
@@ -81,20 +85,47 @@ void RouterDiscoveryTest::parsesExpectedRouterHealth()
 {
     const auto health = parseRouterHealth(R"({
         "status":"ok","service":"onellm-router","pid":42,"version":"1.4.0",
-        "http_port":45678,"models":2,
+        "http_port":45678,"models":2,"config_path":"C:/tmp/router.yaml",
         "proxy_socks5":"127.0.0.1:1082"
     })");
 
     QVERIFY(health.valid);
     QCOMPARE(health.service, QString("onellm-router"));
     QCOMPARE(health.pid, 42);
+    QCOMPARE(health.configPath, QString("C:/tmp/router.yaml"));
     QCOMPARE(health.proxySocks5, QString("127.0.0.1:1082"));
+}
+
+void RouterDiscoveryTest::matchesHealthToSelectedConfig()
+{
+    RouterConfigInfo config;
+    config.valid = true;
+    config.configPath = "C:/tmp/router.yaml";
+    config.port = 45678;
+    RouterHealth health;
+    health.valid = true;
+    health.configPath = "c:/TMP/router.yaml";
+    health.port = 45678;
+
+    QVERIFY(healthMatchesConfig(health, config));
+    health.configPath = "C:/tmp/other.yaml";
+    QVERIFY(!healthMatchesConfig(health, config));
+    health.configPath = config.configPath;
+    health.port++;
+    QVERIFY(!healthMatchesConfig(health, config));
+    health.port = config.port;
+    health.valid = false;
+    QVERIFY(!healthMatchesConfig(health, config));
 }
 
 void RouterDiscoveryTest::rejectsWrongHealthIdentity()
 {
     QVERIFY(!parseRouterHealth(R"({"status":"ok","service":"other"})").valid);
     QVERIFY(!parseRouterHealth(R"({"status":"down","service":"onellm-router"})").valid);
+    QVERIFY(!parseRouterHealth(R"({
+        "status":"ok","service":"onellm-router","pid":42,"version":"1.4.0",
+        "http_port":45678,"models":2,"config_path":""
+    })").valid);
 }
 
 void RouterDiscoveryTest::classifiesExternalConflictAndAbsent()
@@ -188,20 +219,64 @@ void RouterDiscoveryTest::configInfoTimeoutCanRetryAfterProcessFinishes()
     QVERIFY(elapsed.elapsed() - firstFailureMs >= 30);
 }
 
+void RouterDiscoveryTest::samePortDifferentConfigIsConflict()
+{
+    QTcpServer server;
+    const quint16 port = safeDynamicPort(server);
+    QVERIFY(port != 0);
+    const QString configPath =
+        QDir::temp().absoluteFilePath(QString::number(port));
+    const QByteArray body = QJsonDocument(QJsonObject{
+        {"status", "ok"},
+        {"service", "onellm-router"},
+        {"pid", 1},
+        {"version", "1.4.0"},
+        {"http_port", port},
+        {"models", 0},
+        {"config_path", QDir::temp().absoluteFilePath("other-router.yaml")},
+    }).toJson(QJsonDocument::Compact);
+    connect(&server, &QTcpServer::newConnection, &server, [&server, body] {
+        QTcpSocket *socket = server.nextPendingConnection();
+        connect(socket, &QTcpSocket::readyRead, socket, [socket, body] {
+            socket->readAll();
+            socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                          "Content-Length: " + QByteArray::number(body.size()) +
+                          "\r\nConnection: close\r\n\r\n" + body);
+            socket->disconnectFromHost();
+        });
+    });
+
+    RouterDiscovery discovery(fixturePath(), configPath, 1000);
+    QSignalSpy conflict(&discovery, &RouterDiscovery::portConflict);
+    QSignalSpy external(&discovery, &RouterDiscovery::externalRouterFound);
+    discovery.discover();
+    QTRY_COMPARE_WITH_TIMEOUT(conflict.count(), 1, 3000);
+    QCOMPARE(external.count(), 0);
+}
+
 void RouterDiscoveryTest::overlappingDiscoveryDoesNotCreateSecondProbe()
 {
     QTcpServer server;
     const quint16 port = safeDynamicPort(server);
     QVERIFY(port != 0);
+    const QString configPath =
+        QDir::temp().absoluteFilePath(QString::number(port));
     int requests = 0;
-    connect(&server, &QTcpServer::newConnection, &server, [&] {
+    connect(&server, &QTcpServer::newConnection, &server, [&, configPath] {
         QTcpSocket *socket = server.nextPendingConnection();
-        connect(socket, &QTcpSocket::readyRead, socket, [&, socket, port] {
+        connect(socket, &QTcpSocket::readyRead, socket,
+                [&, socket, port, configPath] {
             ++requests;
             socket->readAll();
-            const QByteArray body = QString(
-                R"({"status":"ok","service":"onellm-router","pid":1,"version":"1.4.0","http_port":%1,"models":0})")
-                                        .arg(port).toUtf8();
+            const QByteArray body = QJsonDocument(QJsonObject{
+                {"status", "ok"},
+                {"service", "onellm-router"},
+                {"pid", 1},
+                {"version", "1.4.0"},
+                {"http_port", port},
+                {"models", 0},
+                {"config_path", configPath},
+            }).toJson(QJsonDocument::Compact);
             QTimer::singleShot(100, socket, [socket, body] {
                 socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                               "Content-Length: " + QByteArray::number(body.size()) +
@@ -210,7 +285,7 @@ void RouterDiscoveryTest::overlappingDiscoveryDoesNotCreateSecondProbe()
             });
         });
     });
-    RouterDiscovery discovery(fixturePath(), QString::number(port), 1000);
+    RouterDiscovery discovery(fixturePath(), configPath, 1000);
     QSignalSpy external(&discovery, &RouterDiscovery::externalRouterFound);
     discovery.discover();
     discovery.discover();

@@ -38,6 +38,8 @@ QStringList configInfoArguments(const QString &configPath);
 QNetworkProxy localHealthProxy();
 RouterConfigInfo parseRouterConfigInfo(const QByteArray &payload);
 RouterHealth parseRouterHealth(const QByteArray &payload);
+bool healthMatchesConfig(const RouterHealth &health,
+                         const RouterConfigInfo &config);
 DiscoveryClassification classifyHealthProbe(ProbeTransport transport,
                                             const RouterHealth &health);
 

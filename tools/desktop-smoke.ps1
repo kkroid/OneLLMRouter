@@ -120,7 +120,11 @@ providers:
     while ([DateTime]::UtcNow -lt $deadline -and -not $trayProcess.HasExited) {
         $health = Get-DynamicHealth -Client $httpClient -DynamicPort $port
         if ($null -ne $health) {
-            if ($health.service -ne "onellm-router" -or [int]$health.http_port -ne $port -or [int]$health.pid -le 0) {
+            $healthConfigPath = [IO.Path]::GetFullPath([string]$health.config_path)
+            $expectedConfigPath = [IO.Path]::GetFullPath($configPath)
+            if ($health.service -ne "onellm-router" -or
+                [int]$health.http_port -ne $port -or [int]$health.pid -le 0 -or
+                $healthConfigPath -ne $expectedConfigPath) {
                 throw "Dynamic port returned an unexpected service identity"
             }
             $observedHealth = $health

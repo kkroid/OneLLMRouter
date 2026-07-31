@@ -245,7 +245,7 @@ onellm-router version        # 查看版本
 onellm-router --config <path> config-info --json
 ```
 
-JSON 固定包含 `service`、绝对 `config_path`、`host`、`http_port`、`log_dir`、`proxy_socks5`、`bell`、`onellm_catalog_path` 和 `codex_catalog_path`。`/health` 提供 `service`、`pid`、版本、端口、模型数和代理地址，且不会为健康检查访问上游。
+JSON 固定包含 `service`、绝对 `config_path`、`host`、`http_port`、`log_dir`、`proxy_socks5`、`bell`、`onellm_catalog_path` 和 `codex_catalog_path`。`/health` 提供 `service`、`pid`、版本、端口、模型数、绝对 `config_path` 和代理地址，且不会为健康检查访问上游。桌面托盘仅在端口和配置路径都匹配时附着到已有实例。
 
 桌面父进程使用 `onellm-router serve --tray-child --config <path>` 启动自己拥有的 core 子进程。此内部标志会保留 stdin，在收到独立的 `shutdown` 行或父进程关闭控制管道时优雅退出；它不是 `--daemon` 的通用替代。Go 便携版不包含系统托盘，桌面交互统一由 `onellm-router-tray.exe` 提供。
 

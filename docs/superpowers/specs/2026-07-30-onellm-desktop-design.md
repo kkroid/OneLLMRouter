@@ -55,6 +55,7 @@ The health response gains stable machine-readable identity fields:
   "version": "1.4.0",
   "http_port": 3456,
   "models": 2,
+  "config_path": "C:/Users/user/.onellm/onellm-router.yaml",
   "proxy_socks5": "127.0.0.1:1082"
 }
 ```
@@ -66,7 +67,7 @@ The core also provides a read-only `config-info --json` command. It validates th
 Before starting a core, the tray reads `config-info`, checks the configured port, and classifies the result:
 
 - No listener: start a new child and mark it owned.
-- Matching OneLLMRouter `/health`: attach read-only and mark it external.
+- Matching OneLLMRouter `/health` with the same port and configuration path: attach read-only and mark it external.
 - Any other listener or incompatible health payload: report a port conflict and do not start anything.
 
 The tray may send `shutdown` or restart only a `QProcess` it started in the current session. It must never terminate by image name, enumerate and kill matching processes, or stop an externally attached instance. If graceful shutdown times out, it reports the timeout and leaves the process running.

@@ -1,5 +1,6 @@
 #include "router_discovery.h"
 
+#include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -128,6 +129,8 @@ RouterHealth parseRouterHealth(const QByteArray &payload)
         object.value("version").toString().isEmpty() ||
         !isIntegerInRange(object.value("http_port"), 1, 65535) ||
         !isIntegerInRange(object.value("models"), 0, INT_MAX) ||
+        !isString(object, "config_path") ||
+        object.value("config_path").toString().trimmed().isEmpty() ||
         (object.contains("proxy_socks5") &&
          !object.value("proxy_socks5").isString())) {
         return {};
@@ -141,8 +144,28 @@ RouterHealth parseRouterHealth(const QByteArray &payload)
     result.version = object.value("version").toString();
     result.port = object.value("http_port").toInt();
     result.models = object.value("models").toInt();
+    result.configPath = object.value("config_path").toString();
     result.proxySocks5 = object.value("proxy_socks5").toString();
     return result;
+}
+
+bool healthMatchesConfig(const RouterHealth &health,
+                         const RouterConfigInfo &config)
+{
+    if (!health.valid || !config.valid || health.port != config.port ||
+        health.configPath.isEmpty() || config.configPath.isEmpty()) {
+        return false;
+    }
+
+    const QString healthPath = QDir::cleanPath(
+        QFileInfo(health.configPath).absoluteFilePath());
+    const QString configPath = QDir::cleanPath(
+        QFileInfo(config.configPath).absoluteFilePath());
+#ifdef Q_OS_WIN
+    return healthPath.compare(configPath, Qt::CaseInsensitive) == 0;
+#else
+    return healthPath == configPath;
+#endif
 }
 
 DiscoveryClassification classifyHealthProbe(ProbeTransport transport,
@@ -286,7 +309,7 @@ void RouterDiscovery::finishProbe(const RouterConfigInfo &config,
     if (transport == ProbeTransport::HttpResponse &&
         reply->error() == QNetworkReply::NoError) {
         health = parseRouterHealth(reply->readAll());
-        if (health.valid && health.port != config.port) {
+        if (health.valid && !healthMatchesConfig(health, config)) {
             health.valid = false;
         }
     }

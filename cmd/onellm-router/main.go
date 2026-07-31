@@ -95,7 +95,11 @@ func serveCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Start the proxy daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(configPath())
+			selectedConfigPath, err := filepath.Abs(configPath())
+			if err != nil {
+				return fmt.Errorf("resolve config path: %w", err)
+			}
+			cfg, err := config.Load(selectedConfigPath)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
@@ -166,7 +170,7 @@ func serveCmd() *cobra.Command {
 			}
 
 			mux := http.NewServeMux()
-			registerRoutes(mux, resolver, proxyHandler, cfg, logger)
+			registerRoutes(mux, resolver, proxyHandler, cfg, selectedConfigPath, logger)
 
 			httpServer := &http.Server{Handler: withRequestID(mux, logger)}
 			serverErrCh := make(chan error, 1)
@@ -260,7 +264,7 @@ func statusCmd() *cobra.Command {
 	}
 }
 
-func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler *proxy.Handler, cfg *config.Config, logger *slog.Logger) {
+func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler *proxy.Handler, cfg *config.Config, configPath string, logger *slog.Logger) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			w.WriteHeader(http.StatusNotFound)
@@ -276,6 +280,7 @@ func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler 
 			os.Getpid(),
 			cfg.Server.HTTPPort,
 			len(resolver.AllModelIDs()),
+			configPath,
 			cfg.Proxy.Socks5,
 		)
 		w.Header().Set("Content-Type", "application/json")

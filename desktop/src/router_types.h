@@ -22,6 +22,7 @@ struct RouterHealth {
     QString service;
     QString status;
     QString version;
+    QString configPath;
     QString proxySocks5;
     int pid = 0;
     int port = 0;
