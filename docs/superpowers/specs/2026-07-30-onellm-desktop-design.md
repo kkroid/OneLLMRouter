@@ -88,6 +88,12 @@ The first desktop release includes:
 
 The first release does not include a full settings editor, model editor, log viewer, web dashboard, automatic provider failover, or OneProxy lifecycle controls.
 
+When adopting the desktop release, the installer removes the portable
+`OneLLMRouter` startup value. A directly launched tray also migrates that
+legacy opt-in to the dedicated `OneLLMRouter Desktop` value. Disabling
+start-on-login removes both values so the portable core and desktop tray
+cannot compete for the configured port after sign-in.
+
 ## Installation
 
 Install per-user to `%LOCALAPPDATA%\Programs\OneLLMRouter` without administrator privileges. Store mutable state in `%USERPROFILE%\.onellm`.

@@ -54,6 +54,31 @@ QString autoStartValueName()
     return "OneLLMRouter Desktop";
 }
 
+QString legacyAutoStartValueName()
+{
+    return "OneLLMRouter";
+}
+
+void configureAutoStart(QSettings &settings, bool enabled,
+                        const QString &command)
+{
+    settings.remove(legacyAutoStartValueName());
+    if (enabled) {
+        settings.setValue(autoStartValueName(), command);
+    } else {
+        settings.remove(autoStartValueName());
+    }
+}
+
+bool migrateLegacyAutoStart(QSettings &settings, const QString &command)
+{
+    if (!settings.contains(legacyAutoStartValueName())) {
+        return false;
+    }
+    configureAutoStart(settings, true, command);
+    return true;
+}
+
 bool NotificationLimiter::shouldNotify(const QString &key, const QDateTime &now)
 {
     const auto previous = m_lastShown.constFind(key);
@@ -123,6 +148,11 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
     m_pollTimer.setInterval(2000);
     connect(&m_pollTimer, &QTimer::timeout, this, &TrayApplication::discover);
     if (activateRuntime) {
+        QSettings settings(registryPath(), QSettings::NativeFormat);
+        migrateLegacyAutoStart(
+            settings,
+            autoStartCommand(QCoreApplication::applicationFilePath(),
+                             m_configPath));
         m_trayIcon.show();
         m_pollTimer.start();
         QTimer::singleShot(0, this, &TrayApplication::discover);
@@ -223,11 +253,10 @@ QString TrayApplication::stateText() const
 void TrayApplication::setAutoStartEnabled(bool enabled)
 {
     QSettings settings(registryPath(), QSettings::NativeFormat);
-    if (enabled)
-        settings.setValue(autoStartValueName(),
-                          autoStartCommand(QCoreApplication::applicationFilePath(), m_configPath));
-    else
-        settings.remove(autoStartValueName());
+    configureAutoStart(
+        settings, enabled,
+        autoStartCommand(QCoreApplication::applicationFilePath(),
+                         m_configPath));
 }
 
 bool TrayApplication::autoStartEnabled() const

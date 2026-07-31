@@ -16,12 +16,18 @@ struct TrayActionPolicy {
     bool start = false, stop = false, restart = false, externalManaged = false;
 };
 
+class QSettings;
+
 TrayActionPolicy trayActionPolicy(ProcessOwnership ownership, RouterState state);
 bool shouldAutoStartRouter(ProcessOwnership ownership, bool autoStartAllowed);
 bool healthMatchesOwnedProcess(ProcessOwnership ownership, qint64 processId,
                                const RouterHealth &health);
 QString autoStartCommand(const QString &executable, const QString &configPath);
 QString autoStartValueName();
+QString legacyAutoStartValueName();
+void configureAutoStart(QSettings &settings, bool enabled,
+                        const QString &command);
+bool migrateLegacyAutoStart(QSettings &settings, const QString &command);
 
 class NotificationLimiter {
 public:

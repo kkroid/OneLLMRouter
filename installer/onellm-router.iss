@@ -42,6 +42,7 @@ Name: "{group}\OneLLMRouter"; Filename: "{app}\{#AppExeName}"; Parameters: "--co
 Name: "{group}\Uninstall OneLLMRouter"; Filename: "{uninstallexe}"
 
 [Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "OneLLMRouter"; Flags: deletevalue
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OneLLMRouter Desktop"; ValueData: """{app}\{#AppExeName}"" --config ""{%USERPROFILE}\.onellm\onellm-router.yaml"""; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]

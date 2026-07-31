@@ -1,4 +1,6 @@
 #include <QtTest>
+#include <QSettings>
+#include <QTemporaryDir>
 
 #include "i18n.h"
 #include "tray_application.h"
@@ -10,6 +12,8 @@ class TrayApplicationTest : public QObject
 private slots:
     void quotesAutoStartCommand();
     void usesDedicatedAutoStartValue();
+    void migratesLegacyAutoStartValue();
+    void disablingAutoStartRemovesCurrentAndLegacyValues();
     void externalPolicyHasNoDestructiveActions();
     void conflictPolicyHasNoDestructiveActions();
     void explicitStopDisablesAutomaticRestart();
@@ -34,6 +38,36 @@ void TrayApplicationTest::quotesAutoStartCommand()
 void TrayApplicationTest::usesDedicatedAutoStartValue()
 {
     QCOMPARE(autoStartValueName(), QString("OneLLMRouter Desktop"));
+    QCOMPARE(legacyAutoStartValueName(), QString("OneLLMRouter"));
+}
+
+void TrayApplicationTest::migratesLegacyAutoStartValue()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings(directory.filePath("autostart.ini"),
+                       QSettings::IniFormat);
+    settings.setValue(legacyAutoStartValueName(), "old portable command");
+
+    const QString currentCommand = "current desktop command";
+    QVERIFY(migrateLegacyAutoStart(settings, currentCommand));
+    QVERIFY(!settings.contains(legacyAutoStartValueName()));
+    QCOMPARE(settings.value(autoStartValueName()).toString(), currentCommand);
+    QVERIFY(!migrateLegacyAutoStart(settings, currentCommand));
+}
+
+void TrayApplicationTest::disablingAutoStartRemovesCurrentAndLegacyValues()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QSettings settings(directory.filePath("autostart.ini"),
+                       QSettings::IniFormat);
+    settings.setValue(autoStartValueName(), "current desktop command");
+    settings.setValue(legacyAutoStartValueName(), "old portable command");
+
+    configureAutoStart(settings, false, {});
+    QVERIFY(!settings.contains(autoStartValueName()));
+    QVERIFY(!settings.contains(legacyAutoStartValueName()));
 }
 
 void TrayApplicationTest::externalPolicyHasNoDestructiveActions()

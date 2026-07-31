@@ -80,6 +80,7 @@ jobs:
         run: |
           pwsh -NoProfile -File .\tools\build-safety-test.ps1
           pwsh -NoProfile -File .\tools\desktop-smoke-safety-test.ps1
+          pwsh -NoProfile -File .\tools\installer-autostart-contract-test.ps1
 
       - name: Build desktop and installer
         shell: pwsh
@@ -92,7 +93,7 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File .\tools\desktop-smoke.ps1 -Tray .\desktop\stage\onellm-router-tray.exe -ProtectedPorts 3456,3457
 
-      - name: Verify silent install preservation
+      - name: Verify silent install preservation and autostart migration
         shell: pwsh
         run: |
           $setup = (Resolve-Path -LiteralPath ".\dist\OneLLMRouter-$env:RELEASE_VERSION-setup.exe").Path
@@ -106,8 +107,8 @@ jobs:
 
           & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart"
           if ($LASTEXITCODE -ne 0) { throw "Silent install failed: $LASTEXITCODE" }
-          if ((Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter") -ne $legacyMarker) {
-            throw "Installer changed the legacy OneLLMRouter Run value"
+          if ($null -ne (Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter" -ErrorAction SilentlyContinue)) {
+            throw "Installer left the legacy OneLLMRouter Run value behind"
           }
           if ((Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter Desktop") -ne $desktopRunValue) {
             throw "Silent install did not create the expected desktop autostart value"
@@ -134,8 +135,8 @@ jobs:
               (Get-Content -LiteralPath $configPath -Raw).Trim() -ne $marker) {
             throw "Uninstall removed or changed the user configuration"
           }
-          if ((Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter") -ne $legacyMarker) {
-            throw "Uninstall changed the legacy OneLLMRouter Run value"
+          if ($null -ne (Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter" -ErrorAction SilentlyContinue)) {
+            throw "Uninstall restored the legacy OneLLMRouter Run value"
           }
           if ($null -ne (Get-ItemPropertyValue -Path $runKey -Name "OneLLMRouter Desktop" -ErrorAction SilentlyContinue)) {
             throw "Uninstall left the desktop autostart value behind"
