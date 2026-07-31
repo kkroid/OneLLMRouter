@@ -91,7 +91,9 @@ jobs:
 
       - name: Run isolated desktop smoke test
         shell: pwsh
-        run: pwsh -NoProfile -File .\tools\desktop-smoke.ps1 -Tray .\desktop\stage\onellm-router-tray.exe -ProtectedPorts 3456,3457
+        run: |
+          pwsh -NoProfile -File .\tools\desktop-runtime-contract-test.ps1 -StageDirectory .\desktop\stage
+          pwsh -NoProfile -File .\tools\desktop-smoke.ps1 -Tray .\desktop\stage\onellm-router-tray.exe -ProtectedPorts 3456,3457
 
       - name: Verify silent install preservation and autostart migration
         shell: pwsh

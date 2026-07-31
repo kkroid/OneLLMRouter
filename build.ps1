@@ -54,6 +54,29 @@ function Remove-GeneratedDirectory {
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
 
+function Resolve-VcRuntimeDirectory {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+        throw "vswhere.exe was not found; cannot locate the MSVC runtime"
+    }
+    $installationPath = (& $vswhere -latest -products * -property installationPath |
+        Select-Object -First 1).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($installationPath)) {
+        throw "Visual Studio was not found; cannot locate the MSVC runtime"
+    }
+
+    $redistRoot = Join-Path $installationPath "VC\Redist\MSVC"
+    $versions = @(Get-ChildItem -LiteralPath $redistRoot -Directory -ErrorAction Stop |
+        Sort-Object Name -Descending)
+    foreach ($versionDirectory in $versions) {
+        $candidate = Join-Path $versionDirectory.FullName "x64\Microsoft.VC143.CRT"
+        if (Test-Path -LiteralPath $candidate -PathType Container) {
+            return $candidate
+        }
+    }
+    throw "x64 Microsoft.VC143.CRT was not found under $redistRoot"
+}
+
 Push-Location $PSScriptRoot
 try {
     if ($TestOnly) {
@@ -111,9 +134,16 @@ try {
         & $windeployQt --release --no-translations $trayDestination
         if ($LASTEXITCODE -ne 0) { throw "Qt deployment failed" }
 
+        $vcRuntimeDirectory = Resolve-VcRuntimeDirectory
+        foreach ($runtimeFile in Get-ChildItem -LiteralPath $vcRuntimeDirectory -Filter "*.dll" -File) {
+            Copy-Item -LiteralPath $runtimeFile.FullName -Destination $stage -Force
+        }
+
         foreach ($relativePath in @(
             "onellm-router-core.exe", "onellm-router-tray.exe", "Qt6Core.dll",
-            "Qt6Gui.dll", "Qt6Widgets.dll", "Qt6Network.dll", "platforms\qwindows.dll"
+            "Qt6Gui.dll", "Qt6Widgets.dll", "Qt6Network.dll", "platforms\qwindows.dll",
+            "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll",
+            "vcruntime140.dll", "vcruntime140_1.dll"
         )) {
             if (-not (Test-Path -LiteralPath (Join-Path $stage $relativePath) -PathType Leaf)) {
                 throw "Desktop stage is incomplete; missing $relativePath"
