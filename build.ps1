@@ -121,7 +121,8 @@ try {
         if ([string]::IsNullOrWhiteSpace($InnoSetup) -or -not (Test-Path -LiteralPath $InnoSetup -PathType Leaf)) {
             throw "Inno Setup compiler not found: $InnoSetup"
         }
-        & $InnoSetup "/DAppVersion=$Version" (Join-Path $PSScriptRoot "installer\onellm-router.iss")
+        & $InnoSetup "/DAppVersion=$Version" "/DStageDir=$stage" `
+            (Join-Path $PSScriptRoot "installer\onellm-router.iss")
         if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
         $setup = Join-Path $outDir "OneLLMRouter-$Version-setup.exe"
         if (-not (Test-Path -LiteralPath $setup -PathType Leaf) -or (Get-Item -LiteralPath $setup).Length -le 0) {

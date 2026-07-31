@@ -1,6 +1,9 @@
 #ifndef AppVersion
   #define AppVersion "1.4.0"
 #endif
+#ifndef StageDir
+  #define StageDir "..\desktop\stage"
+#endif
 
 #define AppName "OneLLMRouter"
 #define AppExeName "onellm-router-tray.exe"
@@ -27,7 +30,7 @@ UninstallDisplayIcon={app}\{#AppExeName}
 Name: "autostart"; Description: "Start OneLLMRouter when I sign in"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
-Source: "..\desktop\stage\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\onellm-router.example.yaml"; DestDir: "{%USERPROFILE}\.onellm"; DestName: "onellm-router.yaml"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Dirs]
