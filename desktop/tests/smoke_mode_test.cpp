@@ -8,6 +8,7 @@ class SmokeModeTest : public QObject
 private slots:
     void buildsOwnedHealthyResult();
     void leavesObservationWindowBeforeShutdown();
+    void requiresRequestedNormalCoreExitForSuccess();
 };
 
 void SmokeModeTest::buildsOwnedHealthyResult()
@@ -24,6 +25,20 @@ void SmokeModeTest::buildsOwnedHealthyResult()
 void SmokeModeTest::leavesObservationWindowBeforeShutdown()
 {
     QVERIFY(smokeObservationDelayMs() >= 500);
+}
+
+void SmokeModeTest::requiresRequestedNormalCoreExitForSuccess()
+{
+    QVERIFY(smokeCoreExitIsSuccessful(true, true, 0,
+                                      QProcess::NormalExit));
+    QVERIFY(!smokeCoreExitIsSuccessful(true, false, 0,
+                                       QProcess::NormalExit));
+    QVERIFY(!smokeCoreExitIsSuccessful(false, true, 0,
+                                       QProcess::NormalExit));
+    QVERIFY(!smokeCoreExitIsSuccessful(true, true, 1,
+                                       QProcess::NormalExit));
+    QVERIFY(!smokeCoreExitIsSuccessful(true, true, 0,
+                                       QProcess::CrashExit));
 }
 
 QTEST_APPLESS_MAIN(SmokeModeTest)

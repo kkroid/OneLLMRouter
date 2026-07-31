@@ -31,6 +31,13 @@ int smokeObservationDelayMs()
     return 500;
 }
 
+bool smokeCoreExitIsSuccessful(bool healthObserved, bool shutdownRequested,
+                               int exitCode, QProcess::ExitStatus exitStatus)
+{
+    return healthObserved && shutdownRequested && exitCode == 0 &&
+           exitStatus == QProcess::NormalExit;
+}
+
 SmokeRunner::SmokeRunner(QString configPath, QString resultPath,
                          QObject *parent)
     : QObject(parent),
@@ -71,7 +78,7 @@ SmokeRunner::SmokeRunner(QString configPath, QString resultPath,
                                 << health.pid << m_process.processId();
                     fail(3, QStringLiteral("owned process health PID mismatch"));
                 } else {
-                    writeResultAndStop(health);
+                    observeAndStop(health);
                 }
             });
     connect(&m_process, &RouterProcess::processStarted, this,
@@ -87,8 +94,16 @@ SmokeRunner::SmokeRunner(QString configPath, QString resultPath,
     connect(&m_process, &RouterProcess::gracefulStopTimedOut, this,
             [this] { fail(6, QStringLiteral("graceful stop timed out")); });
     connect(&m_process, &RouterProcess::processFinished, this,
-            [this](int, QProcess::ExitStatus) {
-                QCoreApplication::exit(m_resultWritten ? 0 : 4);
+            [this](int exitCode, QProcess::ExitStatus exitStatus) {
+                if (m_terminal) return;
+                if (!smokeCoreExitIsSuccessful(
+                        m_observedHealth.valid, m_shutdownRequested,
+                        exitCode, exitStatus)) {
+                    fail(4, QStringLiteral(
+                        "core exited before successful smoke shutdown"));
+                    return;
+                }
+                succeed();
             });
 }
 
@@ -104,6 +119,8 @@ void SmokeRunner::start()
 
 void SmokeRunner::fail(int exitCode, const QString &message)
 {
+    if (m_terminal) return;
+    m_terminal = true;
     m_startTimer.stop();
     if (!m_resultPath.isEmpty()) {
         QSaveFile file(m_resultPath);
@@ -121,22 +138,33 @@ void SmokeRunner::fail(int exitCode, const QString &message)
     QCoreApplication::exit(exitCode);
 }
 
-void SmokeRunner::writeResultAndStop(const RouterHealth &health)
+void SmokeRunner::observeAndStop(const RouterHealth &health)
 {
+    if (m_terminal || m_observedHealth.valid) return;
     m_startTimer.stop();
+    m_observedHealth = health;
+    QTimer::singleShot(smokeObservationDelayMs(), this, [this] {
+        if (m_terminal) return;
+        if (!m_process.requestGracefulStop()) {
+            fail(6, QStringLiteral("failed to request graceful stop"));
+            return;
+        }
+        m_shutdownRequested = true;
+    });
+}
+
+void SmokeRunner::succeed()
+{
     QSaveFile file(m_resultPath);
     const QByteArray payload =
-        QJsonDocument(buildSmokeResult(health.pid, health.port))
+        QJsonDocument(buildSmokeResult(m_observedHealth.pid,
+                                       m_observedHealth.port))
             .toJson(QJsonDocument::Compact);
     if (!file.open(QIODevice::WriteOnly) ||
         file.write(payload) != payload.size() || !file.commit()) {
         fail(7, QStringLiteral("failed to write smoke result"));
         return;
     }
-    m_resultWritten = true;
-    QTimer::singleShot(smokeObservationDelayMs(), this, [this] {
-        if (!m_process.requestGracefulStop()) {
-            fail(6, QStringLiteral("failed to request graceful stop"));
-        }
-    });
+    m_terminal = true;
+    QCoreApplication::exit(0);
 }

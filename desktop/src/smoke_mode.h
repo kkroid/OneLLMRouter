@@ -9,6 +9,8 @@
 
 QJsonObject buildSmokeResult(qint64 pid, int port);
 int smokeObservationDelayMs();
+bool smokeCoreExitIsSuccessful(bool healthObserved, bool shutdownRequested,
+                               int exitCode, QProcess::ExitStatus exitStatus);
 
 class SmokeRunner : public QObject
 {
@@ -22,12 +24,15 @@ public slots:
 
 private:
     void fail(int exitCode, const QString &message = {});
-    void writeResultAndStop(const RouterHealth &health);
+    void observeAndStop(const RouterHealth &health);
+    void succeed();
 
     QString m_configPath;
     QString m_resultPath;
     RouterDiscovery m_discovery;
     RouterProcess m_process;
     QTimer m_startTimer;
-    bool m_resultWritten = false;
+    RouterHealth m_observedHealth;
+    bool m_shutdownRequested = false;
+    bool m_terminal = false;
 };
