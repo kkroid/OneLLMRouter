@@ -175,25 +175,6 @@ finally {
         }
     }
 
-    if ($identityConfirmed -and $null -ne $observedHealth) {
-        $currentHealth = Get-DynamicHealth -Client $httpClient -DynamicPort $port
-        if ($null -ne $currentHealth -and $currentHealth.service -eq "onellm-router" -and
-            [int]$currentHealth.http_port -eq $port -and [int]$currentHealth.pid -eq [int]$observedHealth.pid) {
-            try {
-                $coreProcess = [Diagnostics.Process]::GetProcessById([int]$observedHealth.pid)
-                $coreProcess.Kill()
-                $null = $coreProcess.WaitForExit(5000)
-                $coreProcess.Dispose()
-            }
-            catch [ArgumentException] {
-                # The verified core already exited.
-            }
-            catch [InvalidOperationException] {
-                # The verified core exited between lookup and cleanup.
-            }
-        }
-    }
-
     if ($null -ne $trayProcess) {
         if ($trayStarted -and -not $trayProcess.HasExited) { $cleanupProcessesExited = $false }
         $trayProcess.Dispose()

@@ -75,9 +75,11 @@ jobs:
           go mod verify
           if ($LASTEXITCODE -ne 0) { throw "Go module verification failed: $LASTEXITCODE" }
 
-      - name: Verify build path safety
+      - name: Verify build and smoke safety
         shell: pwsh
-        run: pwsh -NoProfile -File .\tools\build-safety-test.ps1
+        run: |
+          pwsh -NoProfile -File .\tools\build-safety-test.ps1
+          pwsh -NoProfile -File .\tools\desktop-smoke-safety-test.ps1
 
       - name: Build desktop and installer
         shell: pwsh
