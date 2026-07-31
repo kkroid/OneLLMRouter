@@ -43,7 +43,7 @@ The Go executable gains a tray-child mode intended only for a Qt-owned child pro
 onellm-router-core.exe serve --tray-child --config <absolute-path>
 ```
 
-In tray-child mode, the core remains a foreground child without detaching from the console. It listens for a single `shutdown` line on standard input and then uses the existing graceful HTTP shutdown path. EOF does not stop the server, so a tray crash does not interrupt active LLM requests.
+In tray-child mode, the core remains a foreground child without detaching from the console. It uses the existing graceful HTTP shutdown path after either a standalone `shutdown` line or EOF on standard input, so a normal tray exit or parent-process failure does not orphan the core.
 
 The health response gains stable machine-readable identity fields:
 

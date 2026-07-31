@@ -14,6 +14,7 @@ func watchTrayControl(input io.Reader, stop func()) {
 			return
 		}
 	}
+	stop()
 }
 
 func shouldWatchTrayControl(trayChild bool) bool {

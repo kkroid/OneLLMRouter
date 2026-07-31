@@ -14,11 +14,11 @@ func TestWatchTrayControlStopsOnlyForShutdown(t *testing.T) {
 	}
 }
 
-func TestWatchTrayControlIgnoresEOFAndOtherLines(t *testing.T) {
+func TestWatchTrayControlStopsOnEOF(t *testing.T) {
 	called := 0
 	watchTrayControl(strings.NewReader("ignored\n"), func() { called++ })
-	if called != 0 {
-		t.Fatalf("stop calls = %d, want 0", called)
+	if called != 1 {
+		t.Fatalf("stop calls = %d, want 1", called)
 	}
 }
 
