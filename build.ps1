@@ -88,6 +88,7 @@ try {
     }
     if ($Clean) {
         Remove-GeneratedDirectory -Path $outDir -ExpectedPath (Join-Path $PSScriptRoot "dist")
+        Remove-GeneratedDirectory -Path $desktopBuild -ExpectedPath $desktopBuild
     }
     Remove-GeneratedDirectory -Path $stage -ExpectedPath $stage
     New-Item -ItemType Directory -Path $outDir, $stage -Force | Out-Null
