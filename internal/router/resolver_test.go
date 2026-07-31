@@ -8,7 +8,7 @@ import (
 
 func TestResolverExactMatch(t *testing.T) {
 	r := NewResolver([]Provider{
-		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8", "claude-fable-5"}},
+		{Prefix: "cp", Name: "Provider CP", Models: []string{"claude-opus-4.8", "claude-fable-5"}},
 		{Prefix: "ds", Name: "DeepSeek", Models: []string{"deepseek-v4-pro"}},
 	})
 
@@ -40,7 +40,7 @@ func TestResolverPrefixMatch(t *testing.T) {
 
 func TestResolverUnknownModel(t *testing.T) {
 	r := NewResolver([]Provider{
-		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
+		{Prefix: "cp", Name: "Provider CP", Models: []string{"claude-opus-4.8"}},
 	})
 
 	result := r.Resolve("nonexistent/model")
@@ -96,7 +96,7 @@ func TestResolverRejectsBareDynamicFallback(t *testing.T) {
 
 func TestResolverAllModelIDs(t *testing.T) {
 	r := NewResolver([]Provider{
-		{Prefix: "cp", Name: "Copilot", Models: []string{"m1", "m2"}},
+		{Prefix: "cp", Name: "Provider CP", Models: []string{"m1", "m2"}},
 		{Prefix: "ds", Name: "DeepSeek", Models: []string{"m3"}},
 	})
 
@@ -117,42 +117,16 @@ func TestResolverAllModelIDs(t *testing.T) {
 	}
 }
 
-func TestResolverCopilotProvider(t *testing.T) {
-	r := NewResolver([]Provider{
-		{Prefix: "ds", Name: "DeepSeek", Models: []string{"m3"}},
-		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
-	})
-
-	cp := r.CopilotProvider()
-	if cp == nil {
-		t.Fatal("expected copilot provider")
-	}
-	if cp.Prefix != "cp" {
-		t.Errorf("expected cp prefix, got %s", cp.Prefix)
-	}
-}
-
-func TestResolverNoCopilotProvider(t *testing.T) {
-	r := NewResolver([]Provider{
-		{Prefix: "ds", Name: "DeepSeek", Models: []string{"m3"}},
-	})
-
-	cp := r.CopilotProvider()
-	if cp != nil {
-		t.Error("expected nil for missing copilot provider")
-	}
-}
-
-func TestProviderSupportsEndpointIncludesBuiltInCopilot(t *testing.T) {
+func TestProviderRequiresConfiguredEndpointRegardlessOfPrefix(t *testing.T) {
 	provider := Provider{Prefix: "cp", Models: []string{"claude-opus-4.8"}}
-	if !provider.SupportsEndpoint(EndpointAnthropic) {
-		t.Fatal("built-in Copilot provider must support Anthropic")
+	if provider.SupportsEndpoint(EndpointAnthropic) {
+		t.Fatal("cp prefix must not imply Anthropic support")
 	}
 	if provider.SupportsEndpoint(EndpointOpenAI) {
-		t.Fatal("built-in Copilot provider must not support Chat Completions")
+		t.Fatal("prefix without endpoint must not support Chat Completions")
 	}
 	if provider.SupportsEndpoint(EndpointResponses) {
-		t.Fatal("built-in Copilot provider must not support Responses")
+		t.Fatal("prefix without endpoint must not support Responses")
 	}
 }
 
@@ -183,7 +157,7 @@ func TestResolverOneMAlias(t *testing.T) {
 func TestFromConfig(t *testing.T) {
 	providers := FromConfig([]config.ProviderConfig{
 		{Name: "DeepSeek", Prefix: "ds", BaseURL: "https://api.deepseek.com/anthropic", APIKey: "sk-test", Models: []string{"deepseek-v4-pro", "deepseek-v4-flash"}},
-		{Name: "Copilot", Prefix: "cp", APIKey: "not-needed", Models: []string{"claude-opus-4.8"}},
+		{Name: "Provider CP", Prefix: "cp", BaseURL: "https://example.invalid/anthropic", APIKey: "sk-test", Models: []string{"claude-opus-4.8"}},
 	})
 
 	if len(providers) != 2 {
@@ -208,7 +182,7 @@ func TestFromConfig(t *testing.T) {
 			break
 		}
 	}
-	if cp == nil || cp.Name != "Copilot" || len(cp.Models) != 1 {
+	if cp == nil || cp.Name != "Provider CP" || len(cp.Models) != 1 {
 		t.Errorf("wrong cp provider: %+v", cp)
 	}
 }

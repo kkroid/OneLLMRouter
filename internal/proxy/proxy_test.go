@@ -2,20 +2,15 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/kkroid/onellm-router/internal/auth"
 	"github.com/kkroid/onellm-router/internal/router"
 )
 
@@ -47,18 +42,6 @@ func testMiddleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(sw, r)
 	})
-}
-
-func tokenManagerForTest(t *testing.T) *auth.TokenManager {
-	t.Helper()
-	dir := t.TempDir()
-	tf := filepath.Join(dir, "token")
-	os.WriteFile(tf, []byte("ghu_test_token"), 0600)
-	tm, err := auth.NewTokenManager(tf, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tm
 }
 
 // anthropicSSEPattern verifies the output follows Anthropic SSE spec:
@@ -172,6 +155,27 @@ func TestHandler_NonStreamThroughMiddleware(t *testing.T) {
 	}
 }
 
+func TestHandler_CPPrefixUsesConfiguredAnthropicEndpoint(t *testing.T) {
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"x","type":"message","role":"assistant","model":"m1","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "cp", BaseURL: mockAPI.URL, APIKey: "sk-test", Models: []string{"m1"},
+	}})
+	h := &Handler{Resolver: resolver, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"cp/m1","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // ==================== External SSE passthrough (Anthropic format) ====================
 
 func TestHandler_ExternalSSEPassthrough(t *testing.T) {
@@ -201,161 +205,6 @@ func TestHandler_ExternalSSEPassthrough(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 	assertAnthropicSSE(t, w.Body.String(), "message_start", "content_block_start")
-}
-
-// ==================== Copilot SSE (OpenAI format) → Anthropic translation ====================
-
-func TestHandler_CopilotStream_Basic(t *testing.T) {
-	var copilotFlushes int32
-	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		f, _ := w.(http.Flusher)
-		// OpenAI format from Copilot: data: only, no event: lines
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n")
-		f.Flush()
-		atomic.AddInt32(&copilotFlushes, 1)
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}]}\n\n")
-		f.Flush()
-		atomic.AddInt32(&copilotFlushes, 1)
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-		f.Flush()
-		atomic.AddInt32(&copilotFlushes, 1)
-		io.WriteString(w, "data: [DONE]\n\n")
-		f.Flush()
-	}))
-	defer mockAPI.Close()
-
-	tm := tokenManagerForTest(t)
-	tm.SetTestToken("test-copilot-token", mockAPI.URL)
-	resolver := router.NewResolver([]router.Provider{
-		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
-	})
-	h := &Handler{Resolver: resolver, TokenManager: tm, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
-	body := `{"model":"cp/claude-opus-4.8","max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux := http.NewServeMux()
-	mux.Handle("/v1/messages", testMiddleware(h))
-	mux.ServeHTTP(w, req)
-	if w.Code != 200 {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	// Output MUST be Anthropic SSE with event: lines
-	assertAnthropicSSE(t, w.Body.String(), "message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop")
-}
-
-func TestHandler_CopilotStream_ToolCalls(t *testing.T) {
-	var copilotFlushes int32
-	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		f, _ := w.(http.Flusher)
-		// Chunk 1: role only
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n")
-		f.Flush()
-		// Chunk 2: text
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Let me check.\"}}]}\n\n")
-		f.Flush()
-		atomic.AddInt32(&copilotFlushes, 2)
-		// Chunk 3: tool call ID only (delayed name)
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_abc\"}]}}]}\n\n")
-		f.Flush()
-		atomic.AddInt32(&copilotFlushes, 1)
-		// Chunk 4: tool call name + args
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"bj\\\"}\"}}]}}]}\n\n")
-		f.Flush()
-		atomic.AddInt32(&copilotFlushes, 1)
-		// Chunk 5: finish
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
-		f.Flush()
-		atomic.AddInt32(&copilotFlushes, 1)
-		io.WriteString(w, "data: [DONE]\n\n")
-		f.Flush()
-	}))
-	defer mockAPI.Close()
-
-	tm := tokenManagerForTest(t)
-	tm.SetTestToken("test-token", mockAPI.URL)
-	resolver := router.NewResolver([]router.Provider{
-		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
-	})
-	h := &Handler{Resolver: resolver, TokenManager: tm, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
-	body := `{"model":"cp/claude-opus-4.8","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"weather in beijing"}]}`
-	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux := http.NewServeMux()
-	mux.Handle("/v1/messages", testMiddleware(h))
-	mux.ServeHTTP(w, req)
-	if w.Code != 200 {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	// MUST have event: lines for ALL Anthropic SSE events
-	assertAnthropicSSE(t, w.Body.String(),
-		"message_start", "content_block_start", "content_block_delta",
-		"content_block_stop", "message_delta", "message_stop")
-	if !strings.Contains(w.Body.String(), "get_weather") {
-		t.Error("missing tool name get_weather")
-	}
-}
-
-// ==================== SSE format validation ====================
-
-func TestSSEOutputFormat_AllEventsHaveEventLine(t *testing.T) {
-	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		f, _ := w.(http.Flusher)
-		// OpenAI format (no event: lines) — this is what Copilot actually sends
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n")
-		f.Flush()
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}]}\n\n")
-		f.Flush()
-		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-		f.Flush()
-		io.WriteString(w, "data: [DONE]\n\n")
-		f.Flush()
-	}))
-	defer mockAPI.Close()
-
-	tm := tokenManagerForTest(t)
-	tm.SetTestToken("test-token", mockAPI.URL)
-	resolver := router.NewResolver([]router.Provider{
-		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
-	})
-	h := &Handler{Resolver: resolver, TokenManager: tm, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
-	body := `{"model":"cp/claude-opus-4.8","max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux := http.NewServeMux()
-	mux.Handle("/v1/messages", testMiddleware(h))
-	mux.ServeHTTP(w, req)
-	if w.Code != 200 {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	bodyStr := w.Body.String()
-	// Verify every data line is preceded by an event line
-	lines := strings.Split(bodyStr, "\n")
-	for i, line := range lines {
-		if strings.HasPrefix(line, "data: ") {
-			if i == 0 || !strings.HasPrefix(lines[i-1], "event: ") {
-				// Allow "data: [DONE]" without event
-				if !strings.Contains(line, "[DONE]") {
-					t.Errorf("data line without preceding event line at line %d: %s", i+1, line[:min(80, len(line))])
-				}
-			}
-		}
-	}
-
-	// Count events
-	counts := parseSSEEvents(bodyStr)
-	for _, required := range []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"} {
-		if counts[required] == 0 {
-			t.Errorf("missing required event type: %s", required)
-		}
-	}
-	t.Logf("SSE events: %v", counts)
 }
 
 func TestExternalPassthrough_AnyFormat(t *testing.T) {
@@ -506,37 +355,6 @@ func TestHandler_ContextCancel(t *testing.T) {
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-}
-
-// ==================== Copilot API error ====================
-
-func TestHandler_CopilotError(t *testing.T) {
-	var baseURL string
-	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/token") {
-			w.Write([]byte(`{"token":"tid=test;exp=2000000000","endpoints":{"api":"` + baseURL + `"}}`))
-			return
-		}
-		w.WriteHeader(500)
-	}))
-	baseURL = mockAPI.URL
-	defer mockAPI.Close()
-	tm := tokenManagerForTest(t)
-	tm.SetTestToken("test-token", mockAPI.URL)
-	resolver := router.NewResolver([]router.Provider{
-		{Prefix: "cp", Name: "Copilot", Models: []string{"claude-opus-4.8"}},
-	})
-	h := &Handler{Resolver: resolver, TokenManager: tm, ProxyClient: mockAPI.Client(), DirectClient: mockAPI.Client(), Logger: slog.New(slog.DiscardHandler)}
-	body := `{"model":"cp/claude-opus-4.8","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if errMap, _ := resp["error"].(map[string]interface{}); errMap == nil {
-		t.Error("expected error response from copilot API failure")
-	}
 }
 
 func TestExternalRequestUsesTimeoutOverride(t *testing.T) {

@@ -46,14 +46,6 @@ func streamIdleTimeout() time.Duration {
 	return durationFromEnv("ONELLM_STREAM_IDLE_TIMEOUT_MS", 300*time.Second)
 }
 
-func copilotRequestTimeout() time.Duration {
-	return durationFromEnv("ONELLM_COPILOT_REQUEST_TIMEOUT_MS", 60*time.Second)
-}
-
-func copilotStreamTimeout() time.Duration {
-	return durationFromEnv("ONELLM_COPILOT_STREAM_TIMEOUT_MS", 300*time.Second)
-}
-
 type streamLineResult struct {
 	line string
 	err  error

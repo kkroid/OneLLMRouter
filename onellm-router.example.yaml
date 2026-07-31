@@ -33,14 +33,6 @@ codex:
       supported_reasoning_levels: [low, medium, high, xhigh, max]
 
 providers:
-  - name: "GitHub Copilot"
-    prefix: "cp"
-    # cp 前缀内置处理，无需 base_url 和真实 api_key（OAuth 登录）
-    api_key: "not-needed"
-    models:
-      - "claude-opus-4.8"
-      - "claude-fable-5"
-
   - name: "DeepSeek"
     prefix: "ds"
     base_url: "https://api.deepseek.com/anthropic"
@@ -85,7 +77,7 @@ providers:
 # 启动时打印到控制台，复制到 Claude Code settings.json 即可
 model_slots:
   default: "ds/deepseek-v4-pro[1m]"
-  opus: "cp/claude-opus-4.8"
+  opus: "ds/deepseek-v4-pro[1m]"
   sonnet: "ds/deepseek-v4-pro[1m]"
   haiku: "ds/deepseek-v4-flash[1m]"
-  fable: "cp/claude-fable-5"
+  fable: "ds/deepseek-v4-flash[1m]"

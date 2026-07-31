@@ -586,9 +586,7 @@ $timeoutEnvNames = @(
     "ONELLM_EXTERNAL_STREAM_TIMEOUT_MS",
     "ONELLM_OPENAI_REQUEST_TIMEOUT_MS",
     "ONELLM_STREAM_FIRST_EVENT_TIMEOUT_MS",
-    "ONELLM_STREAM_IDLE_TIMEOUT_MS",
-    "ONELLM_COPILOT_REQUEST_TIMEOUT_MS",
-    "ONELLM_COPILOT_STREAM_TIMEOUT_MS"
+    "ONELLM_STREAM_IDLE_TIMEOUT_MS"
 )
 $oldTimeoutEnv = @{}
 foreach ($name in $timeoutEnvNames) {
@@ -602,8 +600,6 @@ try {
         $env:ONELLM_OPENAI_REQUEST_TIMEOUT_MS = [string]$SilentTimeoutMs
         $env:ONELLM_STREAM_FIRST_EVENT_TIMEOUT_MS = [string]$SilentTimeoutMs
         $env:ONELLM_STREAM_IDLE_TIMEOUT_MS = [string]$SilentTimeoutMs
-        $env:ONELLM_COPILOT_REQUEST_TIMEOUT_MS = [string]$SilentTimeoutMs
-        $env:ONELLM_COPILOT_STREAM_TIMEOUT_MS = [string]([Math]::Max($SilentTimeoutMs * 5, 5000))
     }
 
     & go build -o $mockExe $mockFile 1>> $mockOutLog 2>> $mockErrLog

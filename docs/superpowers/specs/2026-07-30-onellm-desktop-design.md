@@ -55,7 +55,6 @@ The health response gains stable machine-readable identity fields:
   "version": "1.4.0",
   "http_port": 3456,
   "models": 2,
-  "copilot_token": true,
   "proxy_socks5": "127.0.0.1:1082"
 }
 ```
@@ -77,7 +76,7 @@ The tray may send `shutdown` or restart only a `QProcess` it started in the curr
 The first desktop release includes:
 
 - Green, yellow, and red rounded-square OneLLMRouter icons with the white hexagon glyph.
-- Router state, version, port, model count, and Copilot token state.
+- Router state, version, port, and model count.
 - Configured SOCKS5 address and local reachability.
 - Start, graceful stop, and restart for an owned core.
 - Read-only attached status for an existing core.

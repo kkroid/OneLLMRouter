@@ -137,8 +137,8 @@ func (c *Config) Validate() error {
 		if p.Prefix == "" {
 			return fmt.Errorf("providers[%d]: prefix 不能为空", i)
 		}
-		if len(p.Models) == 0 && p.BaseURL == "" && p.OpenAIBaseURL == "" && p.ResponsesBaseURL == "" {
-			return fmt.Errorf("providers[%d] (%s): 至少需要一个模型或 API 端点", i, p.Prefix)
+		if p.BaseURL == "" && p.OpenAIBaseURL == "" && p.ResponsesBaseURL == "" {
+			return fmt.Errorf("providers[%d] (%s): 至少需要一个 API 端点", i, p.Prefix)
 		}
 	}
 
@@ -172,11 +172,6 @@ func (c *Config) Validate() error {
 	checkSlot("fable", c.ModelSlots.Fable)
 
 	return nil
-}
-
-// DefaultTokenFile returns the default path for the GitHub token.
-func DefaultTokenFile() string {
-	return filepath.Join(DefaultUserDir(), "github_token")
 }
 
 // DefaultUserDir returns the OneLLMRouter user data directory.

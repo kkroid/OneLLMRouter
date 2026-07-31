@@ -128,7 +128,6 @@ RouterHealth parseRouterHealth(const QByteArray &payload)
         object.value("version").toString().isEmpty() ||
         !isIntegerInRange(object.value("http_port"), 1, 65535) ||
         !isIntegerInRange(object.value("models"), 0, INT_MAX) ||
-        !object.value("copilot_token").isBool() ||
         (object.contains("proxy_socks5") &&
          !object.value("proxy_socks5").isString())) {
         return {};
@@ -142,7 +141,6 @@ RouterHealth parseRouterHealth(const QByteArray &payload)
     result.version = object.value("version").toString();
     result.port = object.value("http_port").toInt();
     result.models = object.value("models").toInt();
-    result.copilotToken = object.value("copilot_token").toBool();
     result.proxySocks5 = object.value("proxy_socks5").toString();
     return result;
 }

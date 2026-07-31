@@ -146,7 +146,6 @@ void TrayApplication::rebuildMenu()
                  .arg(m_config.port ? m_config.port : m_health.port));
     disabled(m_strings.proxy.arg(m_config.proxySocks5.isEmpty() ? "-" : m_config.proxySocks5,
                                  m_proxyReachable ? m_strings.reachable : m_strings.unreachable));
-    disabled(m_health.copilotToken ? m_strings.tokenAvailable : m_strings.tokenUnavailable);
     m_menu.addSeparator();
     const auto policy = trayActionPolicy(m_process.ownership(), m_state);
     if (policy.externalManaged) disabled(m_strings.externallyManaged);

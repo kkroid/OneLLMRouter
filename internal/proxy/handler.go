@@ -11,25 +11,15 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kkroid/onellm-router/internal/auth"
 	"github.com/kkroid/onellm-router/internal/catalog"
 	onellmLog "github.com/kkroid/onellm-router/internal/log"
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/translate"
 )
 
-// Copilot HTTP headers required by the API.
-var copilotHeaders = map[string]string{
-	"copilot-integration-id": "vscode-chat",
-	"user-agent":             "GitHubCopilotChat/0.26.7",
-	"editor-version":         "vscode/1.104.1",
-	"editor-plugin-version":  "copilot-chat/0.26.7",
-}
-
 // Handler dispatches Anthropic API requests to providers.
 type Handler struct {
 	Resolver     *router.Resolver
-	TokenManager *auth.TokenManager
 	ProxyClient  *http.Client // requests through SOCKS5 proxy
 	DirectClient *http.Client // requests without proxy
 	Logger       *slog.Logger
@@ -37,10 +27,9 @@ type Handler struct {
 }
 
 // NewHandler creates a proxy Handler.
-func NewHandler(resolver *router.Resolver, tokenMgr *auth.TokenManager, proxyClient, directClient *http.Client, logger *slog.Logger) *Handler {
+func NewHandler(resolver *router.Resolver, proxyClient, directClient *http.Client, logger *slog.Logger) *Handler {
 	handler := &Handler{
 		Resolver:     resolver,
-		TokenManager: tokenMgr,
 		ProxyClient:  proxyClient,
 		DirectClient: directClient,
 		Logger:       logger,
@@ -79,13 +68,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	fullModel := body.Model
 
-	// No model specified → use first Copilot model as default
 	if fullModel == "" {
-		cp := h.Resolver.CopilotProvider()
-		if cp != nil && len(cp.Models) > 0 {
-			h.copilotHandler(w, r, &body, cp.Models[0])
-			return
-		}
 		h.writeError(w, http.StatusBadRequest, "no model specified")
 		return
 	}
@@ -109,149 +92,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Track TTFB via response writer
 	w = &ttfbWriter{ResponseWriter: w, meta: meta}
 
-	if resolved.Provider.Prefix == "cp" {
-		h.copilotHandler(w, r, &body, resolved.Model)
-	} else {
-		h.externalHandler(w, r, &body, resolved)
-	}
-}
-
-// copilotHandler proxies requests to GitHub Copilot API.
-func (h *Handler) copilotHandler(w http.ResponseWriter, r *http.Request, body *translate.AnthropicRequest, model string) {
-	// Inject resolved model name
-	body.Model = model
-
-	openaiReq, err := translate.TranslateRequest(body)
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "translate request: "+err.Error())
-		return
-	}
-
-	token, err := h.TokenManager.GetToken()
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "get token: "+err.Error())
-		return
-	}
-
-	apiBase := h.TokenManager.GetAPIBase()
-	url := apiBase + "/chat/completions"
-
-	reqBody, _ := json.Marshal(openaiReq)
-	timeout := copilotRequestTimeout()
-	if body.Stream {
-		timeout = copilotStreamTimeout()
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "create request: "+err.Error())
-		return
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range copilotHeaders {
-		req.Header.Set(k, v)
-	}
-
-	if !body.Stream {
-		// Non-streaming
-		resp, err := h.ProxyClient.Do(req)
-		if err != nil {
-			h.writeError(w, http.StatusBadGateway, "copilot api: "+err.Error())
-			return
-		}
-		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
-		if resp.StatusCode != 200 {
-			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("copilot api error %d: %s", resp.StatusCode, string(respBody)))
-			return
-		}
-
-		var openaiResp translate.OpenAIResponse
-		if err := json.Unmarshal(respBody, &openaiResp); err != nil {
-			h.writeError(w, http.StatusInternalServerError, "parse copilot response: "+err.Error())
-			return
-		}
-
-		anthropicResp := translate.TranslateResponse(&openaiResp, body.Model)
-		h.writeJSON(w, http.StatusOK, anthropicResp)
-		return
-	}
-
-	// Streaming
-	req.Header.Set("Accept", "text/event-stream")
-	resp, err := h.ProxyClient.Do(req)
-	if err != nil {
-		h.writeError(w, http.StatusBadGateway, "copilot api stream: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("copilot api stream error %d: %s", resp.StatusCode, string(respBody)))
-		return
-	}
-
-	if err := h.streamCopilotResponse(w, resp.Body, body.Model); err != nil && h.Logger != nil {
-		h.Logger.Warn("copilot stream", "error", err)
-	}
-}
-
-// streamCopilotResponse translates an OpenAI SSE stream to Anthropic SSE.
-func (h *Handler) streamCopilotResponse(w http.ResponseWriter, body io.Reader, model string) error {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		h.writeError(w, http.StatusInternalServerError, "streaming not supported")
-		return nil
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
-
-	ctx := &translate.StreamContext{
-		MessageStartSent: false,
-		MessageID:        translate.GenerateMessageID(),
-		Model:            model,
-		ContentBlockIdx:  0,
-		ContentBlockOpen: false,
-		ActiveToolIdx:    -1,
-		ToolCalls:        make(map[int]*translate.ToolCallState),
-	}
-
-	return streamLines(body, streamFirstEventTimeout(), streamIdleTimeout(), func(rawLine string) error {
-		line := strings.TrimSpace(rawLine)
-		if line == "" || !strings.HasPrefix(line, "data: ") {
-			return nil
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			return nil
-		}
-
-		var chunk translate.OpenAIStreamChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return nil
-		}
-
-		events, err := translate.TranslateStreamChunk(&chunk, ctx)
-		if err != nil {
-			return err
-		}
-
-		for _, ev := range events {
-			evJSON, _ := json.Marshal(ev)
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, evJSON)
-			flusher.Flush()
-		}
-		return nil
-	})
+	h.externalHandler(w, r, &body, resolved)
 }
 
 // externalHandler proxies requests to external Anthropic-compatible APIs (direct passthrough).
@@ -415,12 +256,6 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 
 	fullModel := body.Model
 	if fullModel == "" {
-		cp := h.Resolver.CopilotProvider()
-		if cp != nil && len(cp.Models) > 0 {
-			body.Model = cp.Models[0]
-			h.openaiDirectHandler(w, r, &body, &router.ResolveResult{Provider: cp, Model: cp.Models[0]})
-			return
-		}
 		h.writeError(w, http.StatusBadRequest, "no model specified")
 		return
 	}
@@ -440,7 +275,7 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 	meta.MaxTokens = body.MaxTokens
 	w = &ttfbWriter{ResponseWriter: w, meta: meta}
 
-	if resolved.Provider.Prefix == "cp" || resolved.Provider.OpenAIBaseURL != "" {
+	if resolved.Provider.OpenAIBaseURL != "" {
 		body.Model = resolved.Model
 		h.openaiDirectHandler(w, r, &body, resolved)
 	} else {
@@ -451,19 +286,10 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, body *translate.OpenAIRequest, resolved *router.ResolveResult) {
 	body.Model = resolved.Model
 
-	var url string
-	var client *http.Client
-
-	if resolved.Provider.Prefix == "cp" {
-		apiBase := h.TokenManager.GetAPIBase()
-		url = apiBase + "/chat/completions"
-		client = h.ProxyClient
-	} else {
-		url = strings.TrimRight(resolved.Provider.OpenAIBaseURL, "/") + "/v1/chat/completions"
-		client = h.clientFor(resolved.Provider)
-		// OpenAI API doesn't support anthropic [1m] suffix — strip from model name
-		body.Model = strings.TrimSuffix(body.Model, "[1m]")
-	}
+	url := strings.TrimRight(resolved.Provider.OpenAIBaseURL, "/") + "/v1/chat/completions"
+	client := h.clientFor(resolved.Provider)
+	// OpenAI API doesn't support anthropic [1m] suffix — strip from model name
+	body.Model = strings.TrimSuffix(body.Model, "[1m]")
 
 	reqBody, _ := json.Marshal(body)
 	ctx, cancel := context.WithTimeout(r.Context(), openAIRequestTimeout())
@@ -475,19 +301,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	if resolved.Provider.Prefix == "cp" {
-		token, err := h.TokenManager.GetToken()
-		if err != nil {
-			h.writeError(w, http.StatusInternalServerError, "get token: "+err.Error())
-			return
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		for k, v := range copilotHeaders {
-			req.Header.Set(k, v)
-		}
-	} else {
-		req.Header.Set("Authorization", "Bearer "+resolved.Provider.APIKey)
-	}
+	req.Header.Set("Authorization", "Bearer "+resolved.Provider.APIKey)
 
 	if !body.Stream {
 		resp, err := client.Do(req)

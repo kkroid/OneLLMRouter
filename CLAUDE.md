@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-**个人 AI 模型路由网关** — 将 GitHub Copilot Claude 模型 + 任意 Anthropic-compatible API 统一暴露为标准 Anthropic + OpenAI 双接口，供 Claude Code 等工具使用。
+**个人 AI 模型路由网关** — 将可配置的 Anthropic、OpenAI Chat Completions 和 OpenAI Responses 供应商统一暴露为标准接口，供 Claude Code、Codex 等工具使用。
 
 - 每人独立部署一套，单机运行
 - 不追求高并发（几个工具同时调用）
@@ -34,7 +34,7 @@ Claude Code CLI              OpenAI 兼容工具
 |------|------|
 | 操作系统 | Windows 11 Pro (10.0.26200) |
 | Shell | bash（Git Bash on Windows） |
-| SOCKS5 代理 | `127.0.0.1:1082`（用于访问 GitHub Copilot API 等外网） |
+| SOCKS5 代理 | `127.0.0.1:1082`（用于访问需要代理的外部供应商） |
 | IDE | VS Code（主力）+ Claude Code（AI 辅助） |
 
 ### 技术栈
@@ -56,10 +56,9 @@ Claude Code CLI              OpenAI 兼容工具
 OneLLMRouter/
 ├── cmd/onellm-router/main.go           # CLI 入口
 ├── internal/
-│   ├── auth/                          # GitHub device OAuth + token 管理
 │   ├── config/                        # YAML 配置加载
 │   ├── log/                           # slog + 按日滚动日志
-│   ├── proxy/                         # HTTP 代理 (Copilot + External)
+│   ├── proxy/                         # HTTP 代理与协议适配
 │   ├── router/                        # Provider 解析 + 模型路由
 │   └── translate/                     # Anthropic ↔ OpenAI 协议翻译
 ├── onellm-router.example.yaml          # 配置模板
@@ -122,7 +121,7 @@ OneLLMRouter/
 | 日志 | `log/slog` + 自实现 daily writer（按天切分，保留 30 天，启动时清理过期日志） |
 | 请求 ID | 每个请求生成 UUID v4，通过 `context.Context` 传递 |
 | 错误处理 | `fmt.Errorf("...: %w", err)` 包装错误链，绝不吞错误 |
-| 代理 | Copilot API 走 SOCKS5 代理（yaml 中 `proxy.socks5` 配置） |
+| 代理 | provider 可选择走 SOCKS5 代理（yaml 中 `proxy.socks5` 与 provider 的 `proxy` 配置） |
 | HTTP | `net/http` 标准库 |
 | SSE 流式输出 | Anthropic: `event: <type>\ndata: <json>\n\n`；OpenAI: `data: <json>\n\n` SSE 直通 |
 | 测试 | `go test`，表驱动测试 |
@@ -130,7 +129,7 @@ OneLLMRouter/
 #### 日志格式
 
 ```json
-{"time":"2026-06-12T10:30:00+08:00","level":"INFO","msg":"request","request_id":"a1b2c3d4","method":"POST","path":"/v1/messages","status":200,"duration_ms":1234,"model":"cp/claude-opus-4.8","provider":"cp","stream":true,"ttfb_ms":650}
+{"time":"2026-06-12T10:30:00+08:00","level":"INFO","msg":"request","request_id":"a1b2c3d4","method":"POST","path":"/v1/messages","status":200,"duration_ms":1234,"model":"ds/deepseek-v4-pro[1m]","provider":"ds","stream":true,"ttfb_ms":650}
 ```
 
 ### 构建命令
@@ -247,7 +246,7 @@ grep '"level":"WARN"' ~/.onellm/logs/onellm-router-*.log
 ### 区分"代理问题"和"上游/客户端问题"
 
 - 错误在 `error` 字段且被 `{}` 包裹 → 上游返回的，代理只是透传（如 `{"error":{...}}`）
-- 错误以 `copilot api` / `external api` / `upstream` 开头 → 代理层与上游通信失败
+- 错误以 `external api` / `upstream` 开头 → 代理层与上游通信失败
 - `status: 200` 但客户端报错 → 检查响应 body 内容，可能是格式不兼容
 - `status: 502` → 代理无法连接上游（网络/DNS/代理断开）
 - `status: 400` → 大多为上游拒绝请求，代理正确透传

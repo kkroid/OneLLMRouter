@@ -26,7 +26,6 @@ struct RouterHealth {
     int pid = 0;
     int port = 0;
     int models = 0;
-    bool copilotToken = false;
 };
 
 constexpr bool canControlRouter(ProcessOwnership ownership)

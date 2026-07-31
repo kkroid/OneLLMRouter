@@ -13,6 +13,17 @@ func TestDefaultConfigOverwritesCodexCatalog(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresProviderEndpointRegardlessOfPrefix(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers = []ProviderConfig{{
+		Name: "ordinary cp prefix", Prefix: "cp", Models: []string{"m1"},
+	}}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("provider without an API endpoint must fail validation")
+	}
+}
+
 func TestLoadPreservesExplicitCodexCatalogDisable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "onellm-router.yaml")
 	data := []byte("codex:\n  overwrite_catalog: false\n")

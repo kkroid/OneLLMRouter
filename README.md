@@ -1,6 +1,6 @@
 # OneLLMRouter
 
-**个人 AI 模型路由网关** — 将 GitHub Copilot Claude 模型 + 任意 Anthropic-compatible API 统一暴露为标准 Anthropic 和 OpenAI 接口，供 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 等工具使用。
+**个人 AI 模型路由网关** — 将可配置的 Anthropic、OpenAI Chat Completions 和 OpenAI Responses 供应商统一暴露为标准接口，供 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、Codex 等工具使用。
 
 提供两种发布形式：无运行时依赖的 Go 便携版，以及带 Qt 系统托盘和安装程序的桌面版。
 
@@ -47,8 +47,6 @@ Claude Code CLI     OpenAI 兼容工具
 
 | 前缀 | 模型 ID | 说明 |
 |------|--------|------|
-| `cp/` | `claude-opus-4.8` | GitHub Copilot |
-| `cp/` | `claude-fable-5` | GitHub Copilot |
 | `ds/` | `deepseek-v4-pro[1m]` | DeepSeek（示例） |
 | `ds/` | `deepseek-v4-flash[1m]` | DeepSeek（示例） |
 
@@ -105,13 +103,6 @@ codex:
       supported_reasoning_levels: [low, medium, high, xhigh, max]
 
 providers:
-  - name: "GitHub Copilot"
-    prefix: "cp"
-    api_key: "not-needed"
-    models:
-      - "claude-opus-4.8"
-      - "claude-fable-5"
-
   - name: "DeepSeek"
     prefix: "ds"
     base_url: "https://api.deepseek.com/anthropic"
@@ -123,10 +114,10 @@ providers:
 
 model_slots:
   default: "ds/deepseek-v4-pro[1m]"
-  opus: "cp/claude-opus-4.8"
+  opus: "ds/deepseek-v4-pro[1m]"
   sonnet: "ds/deepseek-v4-pro[1m]"
   haiku: "ds/deepseek-v4-flash[1m]"
-  fable: "cp/claude-fable-5"
+  fable: "ds/deepseek-v4-flash[1m]"
 ```
 
 ### 3. 启动
@@ -135,7 +126,7 @@ model_slots:
 .\dist\onellm-router-v1.3.2.exe
 ```
 
-启动时会打印 Claude Code 的 `settings.json`，直接复制使用。如果配置了 Copilot 但未登录，会自动弹出 GitHub 设备授权流程。Token 保存在 `~/.onellm/github_token`。
+启动时会打印 Claude Code 的 `settings.json`，可直接用于配置客户端。
 
 ### 4. 验证
 
@@ -191,10 +182,10 @@ curl -N -X POST http://localhost:3456/openai/v1/responses \
     "ANTHROPIC_BASE_URL": "http://localhost:3456/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "x",
     "ANTHROPIC_MODEL": "ds/deepseek-v4-pro[1m]",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "cp/claude-opus-4.8",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "ds/deepseek-v4-pro[1m]",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "ds/deepseek-v4-pro[1m]",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "ds/deepseek-v4-flash[1m]",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL": "cp/claude-fable-5"
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "ds/deepseek-v4-flash[1m]"
   },
   "theme": "dark",
   "skipWorkflowUsageWarning": true
@@ -254,7 +245,7 @@ onellm-router version        # 查看版本
 onellm-router --config <path> config-info --json
 ```
 
-JSON 固定包含 `service`、绝对 `config_path`、`host`、`http_port`、`log_dir`、`proxy_socks5`、`bell`、`onellm_catalog_path` 和 `codex_catalog_path`。`/health` 提供 `service`、`pid`、版本、端口、模型数、Copilot token 状态和代理地址，且不会为健康检查访问上游。
+JSON 固定包含 `service`、绝对 `config_path`、`host`、`http_port`、`log_dir`、`proxy_socks5`、`bell`、`onellm_catalog_path` 和 `codex_catalog_path`。`/health` 提供 `service`、`pid`、版本、端口、模型数和代理地址，且不会为健康检查访问上游。
 
 桌面父进程使用 `onellm-router serve --tray-child --config <path>` 启动自己拥有的 core 子进程。此内部标志会保留 stdin，并只在 stdin 收到独立的 `shutdown` 行时优雅退出；它不是 `--daemon` 的通用替代。Go 便携版不包含系统托盘，桌面交互统一由 `onellm-router-tray.exe` 提供。
 
@@ -264,11 +255,10 @@ JSON 固定包含 `service`、绝对 `config_path`、`host`、`http_port`、`log
 OneLLMRouter/
 ├── cmd/onellm-router/main.go           # CLI 入口
 ├── internal/
-│   ├── auth/                          # GitHub device OAuth + token 管理
 │   ├── catalog/                       # 多 provider 模型发现 + Codex catalog
 │   ├── config/                        # YAML 配置加载
 │   ├── log/                           # slog + 按日滚动
-│   ├── proxy/                         # HTTP 代理 (Copilot + External)
+│   ├── proxy/                         # HTTP 代理与协议适配
 │   ├── router/                        # Provider 解析 + 模型路由
 │   └── translate/                     # Anthropic ↔ OpenAI 协议翻译
 ├── desktop/                           # Qt 6 托盘、状态图标与测试
@@ -300,12 +290,6 @@ proxy:
   socks5: "127.0.0.1:1082"
 
 providers:
-  - name: "GitHub Copilot"
-    prefix: "cp"
-    # cp 前缀无需 api_key (OAuth), 默认走代理
-    api_key: "not-needed"
-    models: ["claude-opus-4.8", "claude-fable-5"]
-
   - name: "DeepSeek"
     prefix: "ds"
     base_url: "https://api.deepseek.com/anthropic"
@@ -314,17 +298,17 @@ providers:
     models: ["deepseek-v4-pro[1m]", "deepseek-v4-flash[1m]"]
 ```
 
-每个 provider 可设置 `proxy`：`true` 走代理，`false` 直连，不填则继承全局设置。Copilot API 有 IP 区域限制必须走代理，国内服务如 DeepSeek 直连更快。
+每个 provider 可设置 `proxy`：`true` 走代理，`false` 直连，不填则继承全局设置。需要跨境访问的供应商通常走代理，国内服务可按网络情况直连。
 
 ### model_slots
 
 ```yaml
 model_slots:
   default: "ds/deepseek-v4-pro[1m]"
-  opus: "cp/claude-opus-4.8"
+  opus: "ds/deepseek-v4-pro[1m]"
   sonnet: "ds/deepseek-v4-pro[1m]"
   haiku: "ds/deepseek-v4-flash[1m]"
-  fable: "cp/claude-fable-5"
+  fable: "ds/deepseek-v4-flash[1m]"
 ```
 
 ## 日志

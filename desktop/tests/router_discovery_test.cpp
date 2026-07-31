@@ -81,7 +81,7 @@ void RouterDiscoveryTest::parsesExpectedRouterHealth()
 {
     const auto health = parseRouterHealth(R"({
         "status":"ok","service":"onellm-router","pid":42,"version":"1.4.0",
-        "http_port":45678,"models":2,"copilot_token":true,
+        "http_port":45678,"models":2,
         "proxy_socks5":"127.0.0.1:1082"
     })");
 
@@ -200,7 +200,7 @@ void RouterDiscoveryTest::overlappingDiscoveryDoesNotCreateSecondProbe()
             ++requests;
             socket->readAll();
             const QByteArray body = QString(
-                R"({"status":"ok","service":"onellm-router","pid":1,"version":"1.4.0","http_port":%1,"models":0,"copilot_token":false})")
+                R"({"status":"ok","service":"onellm-router","pid":1,"version":"1.4.0","http_port":%1,"models":0})")
                                         .arg(port).toUtf8();
             QTimer::singleShot(100, socket, [socket, body] {
                 socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"

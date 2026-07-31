@@ -107,7 +107,7 @@ type SSEUsage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
-// ========== OpenAI Request (what we send to Copilot) ==========
+// ========== OpenAI Request ==========
 
 // OpenAIMessage is a message in an OpenAI-format request.
 type OpenAIMessage struct {

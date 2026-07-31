@@ -51,7 +51,7 @@ func TestStreamChunk_TextThenToolSwitch(t *testing.T) {
 		t.Error("expected text content_block_start")
 	}
 
-	// Then tool call: Copilot closes text block implicitly by sending tool_calls
+	// Then tool call: upstream closes text block implicitly by sending tool_calls
 	chunk2 := &OpenAIStreamChunk{
 		Choices: []OpenAIStreamChoice{
 			{Index: 0, Delta: OpenAIStreamDelta{
@@ -95,7 +95,7 @@ func TestStreamChunk_MultipleTools(t *testing.T) {
 	ctx := &StreamContext{MessageID: "msg", Model: "m",
 		ToolCalls: make(map[int]*ToolCallState)}
 
-	// Copilot sends two tool calls interleaved in one chunk
+	// Upstream sends two tool calls interleaved in one chunk
 	chunk := &OpenAIStreamChunk{
 		Choices: []OpenAIStreamChoice{
 			{Index: 0, Delta: OpenAIStreamDelta{

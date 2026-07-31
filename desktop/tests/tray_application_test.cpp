@@ -95,10 +95,14 @@ void TrayApplicationTest::rebuildsMenuWhenAboutToShow()
                                       Qt::DirectConnection));
 
     bool foundStart = false;
+    bool foundCopilot = false;
     for (QAction *action : tray.menu()->actions()) {
         foundStart = foundStart || action->objectName() == "startRouter";
+        foundCopilot = foundCopilot ||
+                       action->text().contains("Copilot", Qt::CaseInsensitive);
     }
     QVERIFY(foundStart);
+    QVERIFY(!foundCopilot);
 }
 
 void TrayApplicationTest::detachedExternalBecomesControllableStoppedState()

@@ -78,6 +78,7 @@ proxy:
   socks5: "127.0.0.1:1083"
 providers:
   - prefix: "test"
+    base_url: "https://example.invalid/anthropic"
     api_key: "fake-api-key"
     models: ["model"]
 `, logDir)

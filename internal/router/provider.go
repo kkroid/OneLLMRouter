@@ -71,7 +71,7 @@ func (p *Provider) EndpointTypes() []EndpointType {
 func (p *Provider) SupportsEndpoint(endpoint EndpointType) bool {
 	switch endpoint {
 	case EndpointAnthropic:
-		return p.BaseURL != "" || p.Prefix == "cp"
+		return p.BaseURL != ""
 	case EndpointOpenAI:
 		return p.OpenAIBaseURL != ""
 	case EndpointResponses:

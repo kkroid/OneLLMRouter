@@ -19,7 +19,6 @@ import (
 
 	"golang.org/x/sys/windows/registry"
 
-	"github.com/kkroid/onellm-router/internal/auth"
 	"github.com/kkroid/onellm-router/internal/config"
 	onellmLog "github.com/kkroid/onellm-router/internal/log"
 	netproxy "golang.org/x/net/proxy"
@@ -67,8 +66,8 @@ func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "onellm-router",
 		Short: "OneLLMRouter — AI model proxy gateway",
-		Long: `OneLLMRouter unifies GitHub Copilot Claude models and arbitrary
-Anthropic-compatible APIs behind standard Anthropic + OpenAI API endpoints.`,
+		Long: `OneLLMRouter unifies configurable model providers behind standard
+Anthropic and OpenAI API endpoints.`,
 		Version: version,
 		RunE:    serve.RunE,
 	}
@@ -129,26 +128,11 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("create http client: %w", err)
 			}
 
-			tokenFile := config.DefaultTokenFile()
-			tokenMgr, err := auth.NewTokenManager(tokenFile, proxyAddr)
-			if err != nil {
-				return fmt.Errorf("create token manager: %w", err)
-			}
-
-			// Force login if cp configured but no token
-			if resolver.CopilotProvider() != nil && !tokenMgr.CheckTokenAvailable() {
-				fmt.Fprint(os.Stderr, "\n🔑 Copilot 未授权，请先登录:\n")
-				if err := tokenMgr.DeviceLogin(); err != nil {
-					return fmt.Errorf("登录失败: %w", err)
-				}
-				fmt.Fprint(os.Stderr, "✅ 登录成功，启动服务...\n")
-			}
-
 			directClient, err := makeHTTPClient("")
 			if err != nil {
 				return fmt.Errorf("create direct client: %w", err)
 			}
-			proxyHandler := proxy.NewHandler(resolver, tokenMgr, httpClient, directClient, logger)
+			proxyHandler := proxy.NewHandler(resolver, httpClient, directClient, logger)
 			proxyHandler.Catalog.SetReasoningMappings(codexReasoningMappings(cfg.Codex.Models))
 
 			logger.Info("onellm-router starting",
@@ -177,7 +161,7 @@ func serveCmd() *cobra.Command {
 			}
 
 			mux := http.NewServeMux()
-			registerRoutes(mux, resolver, proxyHandler, tokenMgr, cfg, logger)
+			registerRoutes(mux, resolver, proxyHandler, cfg, logger)
 
 			httpServer := &http.Server{Addr: httpAddr, Handler: withRequestID(mux, logger)}
 
@@ -261,7 +245,7 @@ func statusCmd() *cobra.Command {
 	}
 }
 
-func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler *proxy.Handler, tokenMgr *auth.TokenManager, cfg *config.Config, logger *slog.Logger) {
+func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler *proxy.Handler, cfg *config.Config, logger *slog.Logger) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			w.WriteHeader(http.StatusNotFound)
@@ -277,7 +261,6 @@ func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler 
 			os.Getpid(),
 			cfg.Server.HTTPPort,
 			len(resolver.AllModelIDs()),
-			tokenMgr.CheckTokenAvailable(),
 			cfg.Proxy.Socks5,
 		)
 		w.Header().Set("Content-Type", "application/json")

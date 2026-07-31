@@ -9,7 +9,7 @@ import (
 type Resolver struct {
 	mu        sync.RWMutex
 	providers []Provider
-	modelMap  map[string]*Provider // "cp/claude-opus-4.8" → Provider
+	modelMap  map[string]*Provider // "prefix/model" → Provider
 }
 
 // NewResolver creates a Resolver from a provider list.
@@ -49,9 +49,9 @@ type ResolveResult struct {
 
 // Resolve finds the provider for a given full model identifier.
 // Supports:
-//   - "cp/claude-opus-4.8" — exact match
-//   - "cp/claude-opus-4.8[1m]" — exact match (canonical)
-//   - "cp" — prefix-only match, first model
+//   - "provider/model" — exact match
+//   - "provider/model[1m]" — exact match (canonical)
+//   - "provider" — prefix-only match, first model
 //   - Auto-maps [1m]-less names to canonical [1m] names
 //
 // Returns nil if no provider matches.
@@ -65,7 +65,7 @@ func (r *Resolver) Resolve(fullName string) *ResolveResult {
 		return &ResolveResult{Provider: p, Model: model}
 	}
 
-	// Prefix-only match: "cp" → first model
+	// Prefix-only match uses the provider's first configured model.
 	for i := range r.providers {
 		if fullName == r.providers[i].Prefix && len(r.providers[i].Models) > 0 {
 			return &ResolveResult{
@@ -144,19 +144,6 @@ func (r *Resolver) AllModelIDs() []string {
 		}
 	}
 	return ids
-}
-
-// CopilotProvider returns the "cp" provider, or nil if not configured.
-func (r *Resolver) CopilotProvider() *Provider {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	for i := range r.providers {
-		if r.providers[i].Prefix == "cp" {
-			return &r.providers[i]
-		}
-	}
-	return nil
 }
 
 // Providers returns a copy of the provider list.

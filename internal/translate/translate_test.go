@@ -322,7 +322,7 @@ func TestStreamChunk_ToolCall_DelayedName(t *testing.T) {
 		ToolCalls: make(map[int]*ToolCallState),
 	}
 
-	// Chunk 1: Copilot sends ID first, no name (THIS is the bug scenario)
+	// Chunk 1: upstream sends ID first, no name (THIS is the bug scenario)
 	chunk1 := &OpenAIStreamChunk{
 		Choices: []OpenAIStreamChoice{
 			{Index: 0, Delta: OpenAIStreamDelta{
