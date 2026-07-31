@@ -24,9 +24,13 @@ $stage = if ([string]::IsNullOrWhiteSpace($StageDirectory)) {
 } else {
     [IO.Path]::GetFullPath($StageDirectory)
 }
-if (-not $stage.StartsWith($desktopRoot + [IO.Path]::DirectorySeparatorChar,
-        [StringComparison]::OrdinalIgnoreCase)) {
-    throw "StageDirectory must be inside $desktopRoot"
+$stageInfo = [IO.DirectoryInfo]::new($stage)
+$stageParent = if ($null -eq $stageInfo.Parent) { "" } else { $stageInfo.Parent.FullName }
+$stageNameAllowed = $stageInfo.Name.Equals("stage", [StringComparison]::OrdinalIgnoreCase) -or
+    $stageInfo.Name.StartsWith("stage-", [StringComparison]::OrdinalIgnoreCase)
+if (-not [string]::Equals($stageParent, $desktopRoot, [StringComparison]::OrdinalIgnoreCase) -or
+    -not $stageNameAllowed) {
+    throw "StageDirectory must be desktop\stage or a direct desktop\stage-* directory"
 }
 $core = Join-Path $stage "onellm-router-core.exe"
 $desktopBuild = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "desktop\build"))
