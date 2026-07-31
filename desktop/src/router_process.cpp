@@ -139,6 +139,7 @@ bool RouterProcess::startOwned(const QString &configPath)
 
 bool RouterProcess::requestGracefulStop()
 {
+    m_restartPending = false;
     if (m_ownership != ProcessOwnership::Owned || !m_process ||
         m_process->state() == QProcess::NotRunning) {
         return false;
@@ -157,11 +158,10 @@ bool RouterProcess::restart()
     if (m_restartPending || !canControlRouter(m_ownership)) {
         return false;
     }
-    m_restartPending = true;
     if (!requestGracefulStop()) {
-        m_restartPending = false;
         return false;
     }
+    m_restartPending = true;
     return true;
 }
 

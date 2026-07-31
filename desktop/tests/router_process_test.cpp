@@ -13,6 +13,7 @@ private slots:
     void absentInstanceCannotBeControlled();
     void startFailureNeverBecomesOwned();
     void restartStartsOnlyAfterFinished();
+    void explicitStopCancelsPendingRestart();
     void stopTimeoutDoesNotForceTermination();
 };
 
@@ -77,6 +78,21 @@ void RouterProcessTest::restartStartsOnlyAfterFinished()
     QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, 1000);
     QVERIFY(process.requestGracefulStop());
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, 1000);
+}
+
+void RouterProcessTest::explicitStopCancelsPendingRestart()
+{
+    RouterProcess process(processFixturePath(), 1000);
+    QSignalSpy started(&process, &RouterProcess::processStarted);
+    QSignalSpy finished(&process, &RouterProcess::processFinished);
+    QVERIFY(process.startOwned("C:/tmp/slow"));
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, 1000);
+    QVERIFY(process.restart());
+    QVERIFY(process.requestGracefulStop());
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, 1000);
+    QTest::qWait(300);
+    QCOMPARE(started.count(), 1);
+    QCOMPARE(process.ownership(), ProcessOwnership::None);
 }
 
 void RouterProcessTest::stopTimeoutDoesNotForceTermination()
