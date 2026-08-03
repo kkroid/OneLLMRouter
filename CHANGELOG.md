@@ -2,7 +2,7 @@
 
 All notable user-facing changes to OneLLMRouter are documented here.
 
-## [1.4.0] - Unreleased
+## [1.4.0] - 2026-08-03
 
 ### Added
 
