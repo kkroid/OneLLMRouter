@@ -1,5 +1,7 @@
 # OneLLMRouter
 
+[English](README.en.md) | 简体中文 | [更新日志](CHANGELOG.zh-CN.md)
+
 **个人 AI 模型路由网关** — 将可配置的 Anthropic、OpenAI Chat Completions 和 OpenAI Responses 供应商统一暴露为标准接口，供 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、Codex 等工具使用。
 
 提供两种发布形式：无运行时依赖的 Go 便携版，以及带 Qt 系统托盘和安装程序的桌面版。
@@ -63,7 +65,16 @@ git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter
 pwsh build.ps1
 ```
 
-产物在 `dist/onellm-router-v1.3.2.exe`。
+便携版产物在 `dist/onellm-router-v1.4.0.exe`。
+
+构建桌面安装包还需要 Qt 6.8.3（MSVC 2022 x64）、CMake、MSVC 2022 和 Inno Setup 6：
+
+```powershell
+$env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
+pwsh .\build.ps1 -Installer
+```
+
+安装包输出到 `dist/OneLLMRouter-1.4.0-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
 
 ### 2. 配置
 
@@ -133,7 +144,7 @@ model_slots:
 ### 3. 启动
 
 ```bash
-.\dist\onellm-router-v1.3.2.exe
+.\dist\onellm-router-v1.4.0.exe
 ```
 
 启动时会打印 Claude Code 的 `settings.json`，可直接用于配置客户端。

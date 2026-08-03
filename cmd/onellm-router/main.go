@@ -34,7 +34,7 @@ var (
 	daemon    bool
 	noPidLock bool
 	trayChild bool
-	version   string // set via ldflags: -X main.version=1.0.0
+	version   string // set by the build script via ldflags
 )
 
 func init() {

@@ -42,6 +42,7 @@ Claude Code CLI              OpenAI 兼容工具
 | 层 | 语言 | 框架/库 | 说明 |
 |----|------|---------|------|
 | 守护进程 | **Go** 1.25+ | cobra, net/http, slog | 代理核心 + API 路由 + 协议翻译 |
+| 桌面托盘 | **C++17** | Qt 6.8.3 | 状态展示 + core 进程管理 |
 
 ### 为什么 Go？
 
@@ -57,10 +58,14 @@ OneLLMRouter/
 ├── cmd/onellm-router/main.go           # CLI 入口
 ├── internal/
 │   ├── config/                        # YAML 配置加载
+│   ├── catalog/                       # 多 provider 模型发现 + Codex catalog
 │   ├── log/                           # slog + 按日滚动日志
 │   ├── proxy/                         # HTTP 代理与协议适配
 │   ├── router/                        # Provider 解析 + 模型路由
-│   └── translate/                     # Anthropic ↔ OpenAI 协议翻译
+│   ├── translate/                     # Anthropic ↔ OpenAI 协议翻译
+│   └── upstream/                      # 上游重试 + 错误脱敏
+├── desktop/                           # Qt 托盘与测试
+├── installer/                         # Inno Setup 安装器
 ├── onellm-router.example.yaml          # 配置模板
 ├── build.ps1                          # 编译脚本
 └── go.mod
@@ -136,10 +141,13 @@ OneLLMRouter/
 
 ```bash
 # 编译脚本（推荐）
-pwsh build.ps1 -Version "1.0.0"
+pwsh build.ps1 -Version "1.4.0"
 
 # 手动编译
-go build -ldflags="-s -w -X main.version=1.3.2" -o dist/onellm-router-v1.3.2.exe ./cmd/onellm-router/
+go build -ldflags="-s -w -X main.version=1.4.0" -o dist/onellm-router-v1.4.0.exe ./cmd/onellm-router/
+
+# 桌面版与 Setup（需要 QT_ROOT 和 Inno Setup 6）
+pwsh build.ps1 -Version "1.4.0" -Installer
 
 # 测试
 go test ./...
@@ -183,7 +191,7 @@ go test ./...
 
 ```bash
 # 1. 启动
-./dist/onellm-router-v1.3.2.exe
+./dist/onellm-router-v1.4.0.exe
 
 # 2. 健康检查
 curl http://localhost:3456/health

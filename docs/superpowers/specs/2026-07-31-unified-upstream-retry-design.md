@@ -1,5 +1,7 @@
 # OneLLMRouter 统一上游错误重试需求
 
+> 实施状态：功能已在面向 v1.4.0 的 `master` 中完成；第 16 节保留为历史实施清单，最终发布验证、tag 和 GitHub release 尚未完成。
+
 ## 1. 背景
 
 OneLLMRouter 当前将 Anthropic Messages、OpenAI Chat Completions 和 OpenAI Responses 请求转发给不同上游供应商。模型请求收到上游 HTTP 错误或网络错误后会立即返回客户端。Codex 自身虽然会重试部分错误，但重试次数有限；超过其内部上限后，Paseo 中的整个 agent turn 会失败并中断。
