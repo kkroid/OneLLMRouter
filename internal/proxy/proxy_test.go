@@ -260,7 +260,7 @@ func TestAnthropicNonStreamBodyLimitBoundary(t *testing.T) {
 	}
 }
 
-func TestAnthropicRetriesAllNon2xxStatuses(t *testing.T) {
+func TestAnthropicRetriesConfiguredStatuses(t *testing.T) {
 	statuses := []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusBadGateway, http.StatusOK}
 	var calls int
 	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +275,12 @@ func TestAnthropicRetriesAllNon2xxStatuses(t *testing.T) {
 	resolver := router.NewResolver([]router.Provider{{
 		Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"},
 	}})
-	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(4))
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler),
+		newRetryTestExecutorWithStatusCodes(4, []int{
+			http.StatusBadRequest,
+			http.StatusUnauthorized,
+			http.StatusBadGateway,
+		}))
 	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"messages":[]}`))
 	recorder := httptest.NewRecorder()
 
@@ -386,8 +391,8 @@ func TestAnthropicRequestFactoryErrorsStayLocal(t *testing.T) {
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	if strings.Contains(recorder.Body.String(), "upstream_retry_exhausted") {
-		t.Fatalf("local request error was reported as exhausted upstream retry: %s", recorder.Body.String())
+	if strings.Contains(recorder.Body.String(), "upstream_retry_") {
+		t.Fatalf("local request error was reported as an upstream retry result: %s", recorder.Body.String())
 	}
 	if strings.Contains(recorder.Body.String(), secret) {
 		t.Fatalf("local request error leaked provider secret: %s", recorder.Body.String())
@@ -667,9 +672,15 @@ func TestExternalStreamUsesFirstEventTimeoutOverride(t *testing.T) {
 }
 
 func newRetryTestExecutor(maxAttempts int) *upstream.Executor {
+	return newRetryTestExecutorWithStatusCodes(maxAttempts,
+		config.DefaultConfig().Retry.StatusCodes)
+}
+
+func newRetryTestExecutorWithStatusCodes(maxAttempts int, statusCodes []int) *upstream.Executor {
 	return upstream.NewExecutor(config.RetryConfig{
 		Enabled:         true,
 		MaxAttempts:     maxAttempts,
+		StatusCodes:     statusCodes,
 		InitialDelay:    config.Duration(time.Nanosecond),
 		MaxDelay:        config.Duration(time.Nanosecond),
 		MaxElapsed:      config.Duration(time.Second),

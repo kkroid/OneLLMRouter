@@ -50,11 +50,12 @@ func TestWriteAnthropicUpstreamError(t *testing.T) {
 func TestWriteOpenAIUpstreamError(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	failure := &upstream.Failure{
-		Kind:     upstream.FailureTransport,
-		Summary:  "connection reset by peer",
-		Err:      errors.New("connection reset by peer"),
-		Attempts: 9,
-		Elapsed:  5 * time.Minute,
+		Kind:          upstream.FailureTransport,
+		Summary:       "connection reset by peer",
+		Err:           errors.New("connection reset by peer"),
+		Attempts:      9,
+		Elapsed:       5 * time.Minute,
+		RetryEligible: true,
 	}
 
 	writeOpenAIUpstreamError(recorder, "ds", failure)
@@ -80,6 +81,29 @@ func TestWriteOpenAIUpstreamError(t *testing.T) {
 		t.Fatalf("payload = %+v", payload)
 	}
 	assertUpstreamFailureMessage(t, payload.Error.Message, "ds", "9", "5m0s", "connection reset by peer")
+}
+
+func TestWriteOpenAIUpstreamErrorUsesSkippedCodeForIneligibleFailure(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	failure := &upstream.Failure{
+		StatusCode: http.StatusForbidden,
+		Kind:       upstream.FailureHTTP,
+		Attempts:   1,
+	}
+
+	writeOpenAIUpstreamError(recorder, "mars", failure)
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Code != "upstream_retry_skipped" {
+		t.Fatalf("error code = %q, want upstream_retry_skipped", payload.Error.Code)
+	}
 }
 
 func TestUpstreamErrorWriterUsesTimeoutStatus(t *testing.T) {

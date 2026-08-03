@@ -33,7 +33,10 @@ func writeOpenAIUpstreamError(w http.ResponseWriter, provider string, failure *u
 	}{}
 	payload.Error.Message = upstreamFailureMessage(provider, failure)
 	payload.Error.Type = "upstream_error"
-	payload.Error.Code = "upstream_retry_exhausted"
+	payload.Error.Code = "upstream_retry_skipped"
+	if failure.RetryEligible {
+		payload.Error.Code = "upstream_retry_exhausted"
+	}
 	writeUpstreamJSON(w, failureStatus(failure), payload)
 }
 

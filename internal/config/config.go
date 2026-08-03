@@ -60,6 +60,7 @@ func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 type RetryConfig struct {
 	Enabled         bool     `yaml:"enabled"`
 	MaxAttempts     int      `yaml:"max_attempts"`
+	StatusCodes     []int    `yaml:"status_codes"`
 	InitialDelay    Duration `yaml:"initial_delay"`
 	MaxDelay        Duration `yaml:"max_delay"`
 	MaxElapsed      Duration `yaml:"max_elapsed"`
@@ -116,6 +117,7 @@ func DefaultConfig() *Config {
 		Retry: RetryConfig{
 			Enabled:         true,
 			MaxAttempts:     15,
+			StatusCodes:     []int{408, 409, 425, 429, 500, 502, 503, 504},
 			InitialDelay:    Duration(time.Second),
 			MaxDelay:        Duration(30 * time.Second),
 			MaxElapsed:      Duration(5 * time.Minute),
@@ -182,6 +184,16 @@ func (c *Config) Validate() error {
 	}
 	if math.IsNaN(c.Retry.Jitter) || c.Retry.Jitter < 0 || c.Retry.Jitter > 1 {
 		return fmt.Errorf("retry.jitter must be between 0 and 1")
+	}
+	seenRetryStatuses := make(map[int]struct{}, len(c.Retry.StatusCodes))
+	for _, status := range c.Retry.StatusCodes {
+		if status < 100 || status > 599 || (status >= 200 && status < 300) {
+			return fmt.Errorf("retry.status_codes must contain only non-2xx HTTP status codes from 100 to 599")
+		}
+		if _, exists := seenRetryStatuses[status]; exists {
+			return fmt.Errorf("retry.status_codes contains duplicate status %d", status)
+		}
+		seenRetryStatuses[status] = struct{}{}
 	}
 
 	if len(c.Providers) == 0 {

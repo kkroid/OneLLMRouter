@@ -68,7 +68,7 @@ func TestRetryDisabledCallsOnceWithoutWaiting(t *testing.T) {
 
 	_, failure := executor.Do(context.Background(), client, Metadata{}, Options{Mode: Headers}, testRequestFactory())
 
-	if failure == nil || failure.Attempts != 1 || calls.Load() != 1 || len(*waits) != 0 {
+	if failure == nil || failure.Attempts != 1 || failure.RetryEligible || calls.Load() != 1 || len(*waits) != 0 {
 		t.Fatalf("failure = %+v, calls = %d, waits = %v", failure, calls.Load(), *waits)
 	}
 }
@@ -236,20 +236,42 @@ func TestRetryFactoryErrorStopsImmediately(t *testing.T) {
 	}
 }
 
-func TestRetryTreatsEveryNon2xxAsFailure(t *testing.T) {
-	for _, status := range []int{301, 400, 401, 403, 429, 502} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
+func TestRetryUsesConfiguredHTTPStatusCodes(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       int
+		statusCodes  []int
+		wantCalls    int32
+		wantEligible bool
+	}{
+		{name: "default excludes 403", status: http.StatusForbidden, statusCodes: config.DefaultConfig().Retry.StatusCodes, wantCalls: 1},
+		{name: "configured 403", status: http.StatusForbidden, statusCodes: []int{403}, wantCalls: 2, wantEligible: true},
+		{name: "configured 429", status: http.StatusTooManyRequests, statusCodes: []int{429}, wantCalls: 2, wantEligible: true},
+		{name: "configured 502", status: http.StatusBadGateway, statusCodes: []int{502}, wantCalls: 2, wantEligible: true},
+		{name: "empty list", status: http.StatusBadGateway, statusCodes: []int{}, wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			policy := retryPolicy()
 			policy.MaxAttempts = 2
-			executor, _ := newTestExecutor(policy)
+			policy.StatusCodes = tt.statusCodes
+			executor, waits := newTestExecutor(policy)
 			var calls atomic.Int32
 			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 				calls.Add(1)
-				return testResponse(status), nil
+				return testResponse(tt.status), nil
 			})}
+
 			_, failure := executor.Do(context.Background(), client, Metadata{}, Options{Mode: Headers}, testRequestFactory())
-			if failure == nil || failure.StatusCode != status || calls.Load() != 2 {
-				t.Fatalf("failure = %+v, calls = %d", failure, calls.Load())
+
+			if failure == nil || failure.StatusCode != tt.status || calls.Load() != tt.wantCalls {
+				t.Fatalf("failure = %+v, calls = %d, want %d", failure, calls.Load(), tt.wantCalls)
+			}
+			if failure.RetryEligible != tt.wantEligible {
+				t.Fatalf("RetryEligible = %t, want %t", failure.RetryEligible, tt.wantEligible)
+			}
+			if got, want := len(*waits), int(tt.wantCalls-1); got != want {
+				t.Fatalf("waits = %v, want %d", *waits, want)
 			}
 		})
 	}
@@ -879,13 +901,31 @@ func TestRetryLogsExhaustionAndCancellationKinds(t *testing.T) {
 		var output bytes.Buffer
 		executor.logger = slog.New(slog.NewJSONHandler(&output, nil))
 
-		_, failure := executor.Do(context.Background(), failingClient(http.StatusForbidden, nil), Metadata{RequestID: "req-exhausted", Provider: "mars"}, Options{Mode: Headers}, testRequestFactory())
+		_, failure := executor.Do(context.Background(), failingClient(http.StatusBadGateway, nil), Metadata{RequestID: "req-exhausted", Provider: "mars"}, Options{Mode: Headers}, testRequestFactory())
 
-		if failure == nil {
-			t.Fatal("expected failure")
+		if failure == nil || !failure.RetryEligible {
+			t.Fatalf("failure = %+v, want retry-eligible failure", failure)
 		}
 		records := decodeJSONLogRecords(t, output.Bytes())
-		if len(records) != 2 || records[1]["msg"] != "upstream retry exhausted" || records[1]["failure_kind"] != "http" || records[1]["status"] != float64(http.StatusForbidden) {
+		if len(records) != 2 || records[1]["msg"] != "upstream retry exhausted" || records[1]["failure_kind"] != "http" || records[1]["status"] != float64(http.StatusBadGateway) {
+			t.Fatalf("records = %#v", records)
+		}
+	})
+
+	t.Run("skipped", func(t *testing.T) {
+		policy := retryPolicy()
+		policy.MaxAttempts = 3
+		executor, _ := newTestExecutor(policy)
+		var output bytes.Buffer
+		executor.logger = slog.New(slog.NewJSONHandler(&output, nil))
+
+		_, failure := executor.Do(context.Background(), failingClient(http.StatusForbidden, nil), Metadata{RequestID: "req-skipped", Provider: "mars"}, Options{Mode: Headers}, testRequestFactory())
+
+		if failure == nil || failure.RetryEligible || failure.Attempts != 1 {
+			t.Fatalf("failure = %+v, want ineligible single-attempt failure", failure)
+		}
+		records := decodeJSONLogRecords(t, output.Bytes())
+		if len(records) != 2 || records[1]["msg"] != "upstream retry skipped" || records[1]["failure_kind"] != "http" || records[1]["status"] != float64(http.StatusForbidden) {
 			t.Fatalf("records = %#v", records)
 		}
 	})
@@ -993,15 +1033,9 @@ func decodeJSONLogRecords(t *testing.T, data []byte) []map[string]any {
 }
 
 func retryPolicy() config.RetryConfig {
-	return config.RetryConfig{
-		Enabled:         true,
-		MaxAttempts:     4,
-		InitialDelay:    config.Duration(time.Second),
-		MaxDelay:        config.Duration(30 * time.Second),
-		MaxElapsed:      config.Duration(5 * time.Minute),
-		Jitter:          0.2,
-		HonorRetryAfter: true,
-	}
+	policy := config.DefaultConfig().Retry
+	policy.MaxAttempts = 4
+	return policy
 }
 
 func newTestExecutor(policy config.RetryConfig) (*Executor, *[]time.Duration) {

@@ -96,6 +96,8 @@ func TestMarshalCodexFallsBackToCommonReasoningLevels(t *testing.T) {
 		Models []struct {
 			DefaultReasoningLevel    string           `json:"default_reasoning_level"`
 			SupportedReasoningLevels []ReasoningLevel `json:"supported_reasoning_levels"`
+			BaseInstructions         string           `json:"base_instructions"`
+			ModelMessages            any              `json:"model_messages"`
 			Description              any              `json:"description"`
 			AvailabilityNux          any              `json:"availability_nux"`
 			AdditionalSpeedTiers     []string         `json:"additional_speed_tiers"`
@@ -126,6 +128,9 @@ func TestMarshalCodexFallsBackToCommonReasoningLevels(t *testing.T) {
 	if model.PreferWebSockets {
 		t.Fatal("unknown model must not prefer WebSockets")
 	}
+	if model.BaseInstructions != customModelBaseInstructions || model.ModelMessages != nil {
+		t.Fatalf("unknown model inherited official instructions: %+v", model)
+	}
 }
 
 func TestMarshalCodexPreservesUpstreamProviderMetadataButDisablesWebSockets(t *testing.T) {
@@ -133,6 +138,8 @@ func TestMarshalCodexPreservesUpstreamProviderMetadataButDisablesWebSockets(t *t
 		ID: "custom/future-model",
 		CodexMetadata: json.RawMessage(`{
 			"description":"upstream description",
+			"base_instructions":"upstream instructions",
+			"model_messages":{"instructions_template":"upstream template"},
 			"availability_nux":{"message":"upstream"},
 			"additional_speed_tiers":["fast"],
 			"service_tiers":[{"id":"priority"}],
@@ -148,6 +155,8 @@ func TestMarshalCodexPreservesUpstreamProviderMetadataButDisablesWebSockets(t *t
 	var document struct {
 		Models []struct {
 			Description             string            `json:"description"`
+			BaseInstructions        string            `json:"base_instructions"`
+			ModelMessages           map[string]string `json:"model_messages"`
 			AvailabilityNux         map[string]string `json:"availability_nux"`
 			AdditionalSpeedTiers    []string          `json:"additional_speed_tiers"`
 			ServiceTiers            []map[string]any  `json:"service_tiers"`
@@ -165,6 +174,9 @@ func TestMarshalCodexPreservesUpstreamProviderMetadataButDisablesWebSockets(t *t
 	}
 	if model.PreferWebSockets {
 		t.Fatal("WebSockets must remain disabled even when upstream enables them")
+	}
+	if model.BaseInstructions != "upstream instructions" || model.ModelMessages["instructions_template"] != "upstream template" {
+		t.Fatalf("upstream instruction metadata was not preserved: %+v", model)
 	}
 }
 

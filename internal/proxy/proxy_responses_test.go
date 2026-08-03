@@ -400,7 +400,8 @@ func TestResponsesRetriesRedirectWithoutFollowing(t *testing.T) {
 	defer mockAPI.Close()
 
 	resolver := router.NewResolver([]router.Provider{{Prefix: "oai", ResponsesBaseURL: mockAPI.URL, Models: []string{"gpt-5"}}})
-	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler),
+		newRetryTestExecutorWithStatusCodes(2, []int{http.StatusTemporaryRedirect}))
 	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","input":"hi"}`))
 	recorder := httptest.NewRecorder()
 
@@ -491,7 +492,7 @@ func TestResponsesPersistentFailureUsesOpenAIError(t *testing.T) {
 
 	handler.ServeResponses(recorder, request)
 
-	if recorder.Code != http.StatusForbidden || calls != 2 {
+	if recorder.Code != http.StatusForbidden || calls != 1 {
 		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
 	}
 	var payload struct {
@@ -505,10 +506,10 @@ func TestResponsesPersistentFailureUsesOpenAIError(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Error.Type != "upstream_error" || payload.Error.Param != nil || payload.Error.Code != "upstream_retry_exhausted" {
+	if payload.Error.Type != "upstream_error" || payload.Error.Param != nil || payload.Error.Code != "upstream_retry_skipped" {
 		t.Fatalf("payload = %+v", payload)
 	}
-	if strings.Contains(recorder.Body.String(), secret) || !strings.Contains(payload.Error.Message, "Attempts: 2") {
+	if strings.Contains(recorder.Body.String(), secret) || !strings.Contains(payload.Error.Message, "Attempts: 1") {
 		t.Fatalf("unsafe or incomplete error: %s", recorder.Body.String())
 	}
 }
@@ -527,7 +528,7 @@ func TestResponsesRequestFactoryErrorsStayLocalAndSafe(t *testing.T) {
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	if strings.Contains(recorder.Body.String(), secret) || strings.Contains(recorder.Body.String(), "upstream_retry_exhausted") {
+	if strings.Contains(recorder.Body.String(), secret) || strings.Contains(recorder.Body.String(), "upstream_retry_") {
 		t.Fatalf("unsafe local request error: %s", recorder.Body.String())
 	}
 }

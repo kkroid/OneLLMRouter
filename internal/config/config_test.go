@@ -95,6 +95,7 @@ func TestDefaultConfigIncludesRetryDefaults(t *testing.T) {
 	want := RetryConfig{
 		Enabled:         true,
 		MaxAttempts:     15,
+		StatusCodes:     []int{408, 409, 425, 429, 500, 502, 503, 504},
 		InitialDelay:    Duration(time.Second),
 		MaxDelay:        Duration(30 * time.Second),
 		MaxElapsed:      Duration(5 * time.Minute),
@@ -103,6 +104,22 @@ func TestDefaultConfigIncludesRetryDefaults(t *testing.T) {
 	}
 	if got := DefaultConfig().Retry; !reflect.DeepEqual(got, want) {
 		t.Fatalf("retry defaults = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadOverridesRetryStatusCodes(t *testing.T) {
+	cfg := loadTestConfig(t, "retry:\n  status_codes: [403, 429]\n")
+
+	if got, want := cfg.Retry.StatusCodes, []int{403, 429}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("retry status codes = %v, want %v", got, want)
+	}
+}
+
+func TestLoadPreservesExplicitEmptyRetryStatusCodes(t *testing.T) {
+	cfg := loadTestConfig(t, "retry:\n  status_codes: []\n")
+
+	if cfg.Retry.StatusCodes == nil || len(cfg.Retry.StatusCodes) != 0 {
+		t.Fatalf("retry status codes = %#v, want explicit empty list", cfg.Retry.StatusCodes)
 	}
 }
 
@@ -174,6 +191,10 @@ func TestLoadAndValidateRejectsExplicitInvalidRetryConfiguration(t *testing.T) {
 		{name: "jitter below zero", yaml: "retry:\n  jitter: -0.01\n", field: "retry.jitter"},
 		{name: "jitter above one", yaml: "retry:\n  jitter: 1.01\n", field: "retry.jitter"},
 		{name: "jitter NaN", yaml: "retry:\n  jitter: .nan\n", field: "retry.jitter"},
+		{name: "success status", yaml: "retry:\n  status_codes: [200]\n", field: "retry.status_codes"},
+		{name: "status below range", yaml: "retry:\n  status_codes: [99]\n", field: "retry.status_codes"},
+		{name: "status above range", yaml: "retry:\n  status_codes: [600]\n", field: "retry.status_codes"},
+		{name: "duplicate status", yaml: "retry:\n  status_codes: [429, 429]\n", field: "retry.status_codes"},
 	}
 
 	for _, tt := range tests {
@@ -214,7 +235,8 @@ func TestExampleDocumentsRetryPolicy(t *testing.T) {
 		"包含首次调用",
 		"整个错误恢复预算",
 		"单次等待上限",
-		"不使用状态码白名单",
+		"status_codes",
+		"未列出的 HTTP 状态不会重试",
 	} {
 		if !strings.Contains(string(data), statement) {
 			t.Errorf("example retry comments do not state %q", statement)

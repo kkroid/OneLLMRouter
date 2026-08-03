@@ -88,6 +88,7 @@ proxy:
 retry:
   enabled: true
   max_attempts: 15
+  status_codes: [408, 409, 425, 429, 500, 502, 503, 504]
   initial_delay: 1s
   max_delay: 30s
   max_elapsed: 5m
@@ -301,6 +302,7 @@ proxy:
 retry:
   enabled: true
   max_attempts: 15
+  status_codes: [408, 409, 425, 429, 500, 502, 503, 504]
   initial_delay: 1s
   max_delay: 30s
   max_elapsed: 5m
@@ -316,7 +318,7 @@ providers:
     models: ["deepseek-v4-pro[1m]", "deepseek-v4-flash[1m]"]
 ```
 
-`retry` 是全局上游重试策略，默认启用。一次模型请求最多调用上游 15 次，错误恢复预算最多 5 分钟，任意两次尝试间最多等待 30 秒；所有 OneLLMRouter 能看到的非 `2xx` 上游状态都会重试，而不是只重试特定状态码。因此无效 API key、错误 URL、不支持模型等持续的 `400/401/403` 错误也可能延迟到接近 5 分钟才返回。
+`retry` 是全局上游重试策略，默认启用。一次模型请求最多调用上游 15 次，错误恢复预算最多 5 分钟，任意两次尝试间最多等待 30 秒。`status_codes` 严格控制需要重试的 HTTP 状态；默认重试 `408/409/425/429/500/502/503/504`，不包含 `403`。配置者可按上游实际行为增删状态码；显式设置为空列表 `[]` 时不重试任何 HTTP 状态。传输错误、超时和非流式响应体读取错误仍按统一策略重试。
 
 每个 provider 可设置 `proxy`：`true` 走代理，`false` 直连，不填则继承全局设置。需要跨境访问的供应商通常走代理，国内服务可按网络情况直连。
 
@@ -339,4 +341,4 @@ JSON 格式，按天滚动，保留 30 天，文件路径 `~/.onellm/logs/onellm
 {"time":"2026-07-31T10:30:00+08:00","level":"INFO","msg":"request","request_id":"a1b2c3d4","method":"POST","path":"/anthropic/v1/messages","status":200,"duration_ms":1234,"model":"ds/deepseek-v4-pro[1m]","provider":"ds","stream":true,"ttfb_ms":650,"upstream_attempts":3,"retry_elapsed_ms":1012,"last_upstream_status":502,"last_failure_kind":"http"}
 ```
 
-每次上游失败、重试后恢复、最终耗尽和请求取消都会使用同一个 `request_id` 写入结构化日志。错误摘要会限制长度并屏蔽 API key、Authorization 和 Bearer credential。
+每次上游失败、重试后恢复、最终失败和请求取消都会使用同一个 `request_id` 写入结构化日志。符合当前重试配置但达到次数或时间上限时记录 `upstream retry exhausted`；不符合重试配置时记录 `upstream retry skipped`。错误摘要会限制长度并屏蔽 API key、Authorization 和 Bearer credential。

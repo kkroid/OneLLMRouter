@@ -11,7 +11,7 @@ OneLLMRouter 当前将 Anthropic Messages、OpenAI Chat Completions 和 OpenAI R
 ## 2. 目标
 
 - 为所有模型推理上游建立一套统一的重试机制。
-- 对所有上游非 `2xx` HTTP 响应执行相同的重试策略，不维护状态码白名单。
+- 对配置中明确列出的上游 HTTP 状态执行统一重试，未列出的状态立即返回。
 - 对发送请求期间发生的网络和传输错误执行相同的重试策略。
 - 单次重试等待最长约 30 秒，整个重试阶段最长约 5 分钟。
 - 重试成功后保持原有协议和响应内容，客户端无需感知中间失败。
@@ -53,12 +53,12 @@ OneLLMRouter 已完全移除 GitHub Copilot 支持。本设计不得重新引入
 
 在尚未向客户端写出响应的前提下，出现以下任一情况必须进入统一重试：
 
-1. 上游返回任意非 `2xx` HTTP 状态，包括但不限于 `400`、`401`、`403`、`404`、`408`、`409`、`429`、`500`、`502`、`503` 和 `504`。
+1. 上游返回 `retry.status_codes` 中明确配置的 HTTP 状态。
 2. DNS 解析、TCP 连接、TLS 握手、SOCKS5 代理或连接重置等传输错误。
 3. 等待上游响应头期间发生超时。
 4. 非流式请求在读取完整响应体时发生错误，且尚未向客户端写出任何内容。
 
-即使 `400`、`401`、`403` 等错误通常不会自行恢复，也按产品要求使用相同策略重试。这样做可能推迟永久配置错误的反馈，这是明确接受的取舍。
+HTTP 状态判断必须严格服从配置，不解析或猜测第三方响应正文的业务含义。默认列表不包含 `403`；配置者显式加入后，Router 必须重试该状态并由配置者承担这一行为。
 
 ### 5.2 不得重试
 
@@ -71,6 +71,7 @@ OneLLMRouter 已完全移除 GitHub Copilot 支持。本设计不得重新引入
 5. OneLLMRouter 正在关闭。
 6. 流式请求已经接受上游 `2xx` 响应头，或非流式请求已经完整读取成功响应。
 7. 重试次数或总时间已经达到上限。
+8. 上游 HTTP 状态未出现在 `retry.status_codes` 中。
 
 本地错误必须立即返回，不应因为统一重试而延迟五分钟。
 
@@ -82,6 +83,7 @@ OneLLMRouter 已完全移除 GitHub Copilot 支持。本设计不得重新引入
 retry:
   enabled: true
   max_attempts: 15
+  status_codes: [408, 409, 425, 429, 500, 502, 503, 504]
   initial_delay: 1s
   max_delay: 30s
   max_elapsed: 5m
@@ -93,6 +95,7 @@ retry:
 
 - `enabled`：是否启用模型上游统一重试。关闭时统一组件只执行一次请求且不等待，但仍负责资源关闭和协议兼容错误封装。
 - `max_attempts`：最大上游调用次数，包含第一次调用；默认最多调用 15 次。
+- `status_codes`：允许重试的 HTTP 状态码列表，严格按配置匹配。默认不包含 `403`；显式空列表表示不重试任何 HTTP 状态。该字段不影响传输、超时和响应体读取错误。
 - `initial_delay`：第一次失败后的基础等待时间。
 - `max_delay`：任意两次尝试之间的最大等待时间，默认 30 秒。
 - `max_elapsed`：从第一次上游调用开始计算的最大重试阶段时长，默认 5 分钟。
@@ -104,6 +107,7 @@ retry:
 配置层需要一个只接受字符串的 YAML duration 类型，支持 `250ms`、`30s`、`5m` 等 Go duration 语法，并拒绝裸数字，避免误把数字解释为纳秒。验证规则为：
 
 - `max_attempts >= 1`；
+- `status_codes` 只能包含 `100..599` 范围内的非 `2xx` 状态，且不得重复；
 - `initial_delay > 0`；
 - `max_delay >= initial_delay`；
 - `max_elapsed > 0`；
@@ -139,7 +143,7 @@ retry:
 
 - 建立上游连接失败。
 - 等待上游响应头失败。
-- 上游返回任意非 `2xx` 状态。
+- 上游返回 `retry.status_codes` 中配置的非 `2xx` 状态。
 
 此时 OneLLMRouter 尚未向客户端提交成功响应，可以关闭本次上游响应体、等待退避时间并重新建立请求。
 
@@ -265,6 +269,8 @@ Chat Completions 和 Responses 最终错误必须使用：
 }
 ```
 
+`code` 与最终失败在当前配置下的重试资格一致：具备资格但达到次数或时间上限时为 `upstream_retry_exhausted`；未启用重试或 HTTP 状态不在 `status_codes` 中时为 `upstream_retry_skipped`。`max_attempts: 1` 不改变失败的重试资格。
+
 最终错误统一使用 `application/json`，不透传任意上游错误 header 或 Content-Type。成功响应仍保持现有字节、语义、usage、tool call、finish reason、SSE 顺序以及 Responses 流当前透传的成功 header。
 
 ### 10.3 原始错误正文处理
@@ -301,7 +307,7 @@ handler 必须先完成模型解析、模型 ID 改写和协议转换，再把�
 
 统一组件使用同一个重试循环，但提供两种明确模式：
 
-1. **Headers 模式**用于流式请求。非 `2xx` 时读取受限错误正文、关闭 body 并重试；`2xx` 时立即返回保持打开的 response body，不缓存 SSE 数据，由 handler 延续现有透传或翻译。
+1. **Headers 模式**用于流式请求。非 `2xx` 时读取受限错误正文并关闭 body；状态存在于 `retry.status_codes` 时重试，否则立即返回。`2xx` 时立即返回保持打开的 response body，不缓存 SSE 数据，由 handler 延续现有透传或翻译。
 2. **Buffered 模式**用于非流式请求。只有在该路径声明的成功 body 策略内完整读完 `2xx` body 才算成功；读取超时或 I/O 错误属于可重试失败。组件返回响应元数据和完整 body，handler 再执行现有解析、翻译或透传。
 
 Buffered 调用必须显式传入 `SuccessBodyLimit`：`0` 表示不限长，正数表示最多接受的成功正文长度。各路径固定为：
@@ -344,13 +350,13 @@ Headers 模式的成功 body 由 handler 关闭；Buffered 模式的成功 body 
 - `delay_ms`
 - `elapsed_ms`
 
-成功前发生过重试时，记录一条恢复日志，包含尝试次数和总耗时。最终失败时记录一条汇总日志。客户端取消和服务关机分别记录取消原因，不伪装成新的上游错误。同一个客户端请求的全部尝试沿用同一个 `request_id`。
+成功前发生过重试时，记录一条恢复日志，包含尝试次数和总耗时。最终失败具备重试资格但达到次数或时间上限时记录 `upstream retry exhausted`；不具备重试资格时记录 `upstream retry skipped`。客户端取消和服务关机分别记录取消原因，不伪装成新的上游错误。同一个客户端请求的全部尝试沿用同一个 `request_id`。
 
 重试日志不得改变客户端协议，也不新增托盘弹窗或系统通知要求。
 
 ## 13. 兼容性与取舍
 
-- 所有非 `2xx` 都重试会延迟无效 API key、错误 URL 和不支持模型等永久错误的反馈，最长接近五分钟。这是用户明确选择的行为。
+- HTTP 重试行为完全由全局 `status_codes` 决定。默认排除 `403` 等通常不可恢复的状态；配置者可根据第三方供应商的实际行为调整并承担相应取舍。
 - 上游可能对失败尝试计费，OneLLMRouter 无法保证供应商侧幂等或零费用。
 - 重试可能增加上游负载，因此必须具有最大次数、最大总时长和随机抖动。
 - 客户端自身可能仍有小于五分钟的超时；Router 无法阻止客户端提前取消。一旦客户端取消，Router 必须立即结束重试。
@@ -365,13 +371,14 @@ Headers 模式的成功 body 由 handler 关闭；Buffered 模式的成功 body 
 - 缺少 `retry` 配置时使用文档中的默认值。
 - 配置可关闭统一重试。
 - 非法时长、负数、零上限和非法 jitter 在启动校验阶段返回清晰错误。
+- 非法、成功态或重复的 `status_codes` 在启动校验阶段返回清晰错误；显式空列表合法。
 - 示例配置和 README 描述新增字段及默认行为。
 
 ### 14.2 HTTP 状态重试
 
 - 上游第一次返回 `429`、第二次返回成功时，客户端只收到成功响应。
-- 上游依次返回 `400`、`401`、`502` 后成功时，所有失败均使用同一策略重试。
-- 上游 `3xx` 不被自动跟随，而是作为非 `2xx` 重试并保留最终状态。
+- 上游依次返回配置中列出的 `400`、`401`、`502` 后成功时，所有失败均使用同一策略重试。
+- 上游 `3xx` 不被自动跟随；配置该状态时重试，未配置时立即保留并返回。
 - 上游持续返回错误时，在次数或五分钟时间上限到达后停止。
 - 最终错误包含尝试次数、耗时、最后状态和清理后的最后响应正文。
 
@@ -400,7 +407,7 @@ Headers 模式的成功 body 由 handler 关闭；Buffered 模式的成功 body 
 
 ### 14.6 流式边界
 
-- 流式上游返回非 `2xx` 后可以重试并在成功后正常透传。
+- 流式上游返回配置列出的非 `2xx` 后可以重试并在成功后正常透传。
 - 流式上游的 `2xx` 响应头被接受后断开时不创建第二个上游请求。
 - 不产生重复的 SSE 开始、结束或工具调用事件。
 
@@ -451,7 +458,7 @@ Anthropic Messages、Chat Completions 直连、Chat 到 Anthropic 翻译、Respo
 4. HTTP server 具有可在 Shutdown 前取消的服务生命周期 context。
 5. 四条模型推理路径的流式和非流式分支全部使用同一重试组件。
 6. 默认策略为最多 15 次调用、首次等待 1 秒、单次等待最多 30 秒、失败恢复最多 5 分钟和 20% jitter。
-7. 所有可见非 `2xx`、规定的传输错误和 Buffered body 读取错误均进入重试。
+7. 配置列出的 HTTP 状态、规定的传输错误和 Buffered body 读取错误进入重试；未列出的 HTTP 状态立即返回。
 8. 客户端取消和服务关机及时终止请求与等待，且不写入伪造错误。
 9. 最终失败响应包含协议兼容的安全摘要，且 `2xx` body 失败不会返回成功状态。
 10. 流式 `2xx` 响应头被接受后不会自动重试，也不会受剩余 `max_elapsed` 终止。
@@ -474,16 +481,17 @@ Anthropic Messages、Chat Completions 直连、Chat 到 Anthropic 翻译、Respo
 工作：
 
 - [ ] 新增 RetryConfig 和严格的字符串 Duration YAML 类型，并挂到 Config.Retry。
-- [ ] 在 DefaultConfig 中设置第 6 节的七个默认值。
-- [ ] 验证 max_attempts、initial_delay、max_delay、max_elapsed 和 jitter 的边界及字段关系。
+- [ ] 在 DefaultConfig 中设置第 6 节的八个默认值。
+- [ ] 验证 max_attempts、status_codes、initial_delay、max_delay、max_elapsed 和 jitter 的边界及字段关系。
 - [ ] 证明缺少 retry block、缺少单个字段、enabled: false、裸数字 duration、零值和负值的加载行为。
-- [ ] 在示例配置和 README 中记录默认启用、全局作用域、最长五分钟以及所有非 2xx 都重试的取舍。
+- [ ] 在示例配置和 README 中记录默认启用、全局作用域、最长五分钟和状态码严格按配置匹配的行为。
 
 预期接口形状：
 
     type RetryConfig struct {
         Enabled         bool     `yaml:"enabled"`
         MaxAttempts     int      `yaml:"max_attempts"`
+        StatusCodes     []int    `yaml:"status_codes"`
         InitialDelay    Duration `yaml:"initial_delay"`
         MaxDelay        Duration `yaml:"max_delay"`
         MaxElapsed      Duration `yaml:"max_elapsed"`
@@ -650,7 +658,7 @@ Anthropic Messages、Chat Completions 直连、Chat 到 Anthropic 翻译、Respo
 - [ ] 保持现有 provider/model 前缀移除逻辑在重试前只执行一次。
 - [ ] request factory 每次设置 Authorization、Content-Type 和流式 Accept。
 - [ ] 非流式迁移到 Buffered；流式迁移到 Headers，并仅在最终 2xx 后复制现有成功 header。
-- [ ] 证明 3xx 不自动跳转、非 2xx 可重试、非流式 body 读取错误可重试。
+- [ ] 证明 3xx 不自动跳转、配置列出的非 2xx 可重试、未列出的状态立即返回、非流式 body 读取错误可重试。
 - [ ] 保留当前 Responses 字节透传和流式 io.Copy 行为；接受 2xx 后的断流只记录错误，不重试。
 
 验证：
@@ -670,7 +678,7 @@ Anthropic Messages、Chat Completions 直连、Chat 到 Anthropic 翻译、Respo
 工作：
 
 - [ ] 每次失败和等待写出第 12 节要求的结构化字段，错误字段只能使用安全摘要。
-- [ ] 重试后成功记录 recovered；最终失败记录 exhausted；客户端取消和服务关闭使用不同 failure_kind。
+- [ ] 重试后成功记录 recovered；具备重试资格的最终失败记录 exhausted，不具备资格的失败记录 skipped；客户端取消和服务关闭使用不同 failure_kind。
 - [ ] 扩展 RequestMeta 和请求结束日志，记录总尝试次数、重试耗时、最后状态及最后失败种类。
 - [ ] 同一请求的所有日志沿用 middleware 生成的 request_id。
 - [ ] 测试日志输出不包含配置 API key、Bearer token 或被清理前的上游正文。

@@ -63,12 +63,13 @@ const (
 )
 
 type Failure struct {
-	StatusCode int
-	Kind       FailureKind
-	Summary    string
-	Err        error
-	Attempts   int
-	Elapsed    time.Duration
+	StatusCode    int
+	Kind          FailureKind
+	Summary       string
+	Err           error
+	Attempts      int
+	Elapsed       time.Duration
+	RetryEligible bool
 }
 
 type Executor struct {
@@ -206,6 +207,10 @@ func (e *Executor) Do(
 			e.logAttemptFailure(metadata, maxAttempts, lastFailure, 0, options.Sanitizer)
 			return e.completeFailure(ctx, metadata, maxAttempts, options.Sanitizer, lastFailure)
 		}
+		if !e.shouldRetry(lastFailure) {
+			e.logAttemptFailure(metadata, maxAttempts, lastFailure, 0, options.Sanitizer)
+			return e.completeFailure(ctx, metadata, maxAttempts, options.Sanitizer, lastFailure)
+		}
 
 		delay := e.retryDelay(attempt, response)
 		remaining := time.Duration(e.policy.MaxElapsed) - e.elapsed(started)
@@ -256,6 +261,7 @@ func (e *Executor) completeFailure(
 	sanitizer *Sanitizer,
 	failure *Failure,
 ) (*Result, *Failure) {
+	failure.RetryEligible = e.shouldRetry(failure)
 	e.recordRequestMeta(ctx, failure.Attempts, failure.Elapsed, failure)
 	if e.logger == nil || failure.Kind == FailureLocal {
 		return nil, failure
@@ -273,14 +279,33 @@ func (e *Executor) completeFailure(
 	}
 	if failure.Kind == FailureClientCancel || failure.Kind == FailureServiceShutdown {
 		e.logger.Info("upstream retry canceled", attrs...)
-	} else {
+	} else if failure.RetryEligible {
 		e.logger.Error("upstream retry exhausted", attrs...)
+	} else {
+		e.logger.Error("upstream retry skipped", attrs...)
 	}
 	return nil, failure
 }
 
 func isCancellationFailure(failure *Failure) bool {
 	return failure.Kind == FailureClientCancel || failure.Kind == FailureServiceShutdown
+}
+
+func (e *Executor) shouldRetry(failure *Failure) bool {
+	if !e.policy.Enabled || failure == nil {
+		return false
+	}
+	if failure.Kind != FailureHTTP {
+		return failure.Kind == FailureTransport ||
+			failure.Kind == FailureBodyRead ||
+			failure.Kind == FailureTimeout
+	}
+	for _, status := range e.policy.StatusCodes {
+		if failure.StatusCode == status {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Executor) logAttemptFailure(metadata Metadata, maxAttempts int, failure *Failure, delay time.Duration, sanitizer *Sanitizer) {

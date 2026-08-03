@@ -21,6 +21,8 @@ var (
 	officialModelsErr  error
 )
 
+const customModelBaseInstructions = "You are Codex, a coding agent."
+
 func MarshalCodex(models []Model) ([]byte, error) {
 	templates, err := loadOfficialModels()
 	if err != nil {
@@ -49,6 +51,8 @@ func MarshalCodex(models []Model) ([]byte, error) {
 		setCodexField(model, "auto_review_model_override", nil)
 		if !knownModel {
 			setCodexField(model, "description", nil)
+			setCodexField(model, "model_messages", nil)
+			setCodexField(model, "base_instructions", customModelBaseInstructions)
 		}
 		if len(entry.CodexMetadata) > 0 {
 			upstream, err := decodeCodexModel(entry.CodexMetadata)

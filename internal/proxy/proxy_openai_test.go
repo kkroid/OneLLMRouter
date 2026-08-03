@@ -271,7 +271,7 @@ func TestOpenAIChatPersistentFailuresUseProtocolError(t *testing.T) {
 
 			handler.ServeOpenAI(recorder, request)
 
-			if recorder.Code != http.StatusForbidden || calls != 2 {
+			if recorder.Code != http.StatusForbidden || calls != 1 {
 				t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
 			}
 			var payload struct {
@@ -285,10 +285,10 @@ func TestOpenAIChatPersistentFailuresUseProtocolError(t *testing.T) {
 			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 				t.Fatal(err)
 			}
-			if payload.Error.Type != "upstream_error" || payload.Error.Param != nil || payload.Error.Code != "upstream_retry_exhausted" {
+			if payload.Error.Type != "upstream_error" || payload.Error.Param != nil || payload.Error.Code != "upstream_retry_skipped" {
 				t.Fatalf("payload = %+v", payload)
 			}
-			if strings.Contains(recorder.Body.String(), secret) || !strings.Contains(payload.Error.Message, "Attempts: 2") {
+			if strings.Contains(recorder.Body.String(), secret) || !strings.Contains(payload.Error.Message, "Attempts: 1") {
 				t.Fatalf("unsafe or incomplete error: %s", recorder.Body.String())
 			}
 		})

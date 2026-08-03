@@ -17,11 +17,12 @@ proxy:
 # 全局上游重试，默认启用。
 # max_attempts: 15 包含首次调用；max_elapsed: 5m 是整个错误恢复预算。
 # max_delay: 30s 是单次等待上限。
-# 所有可见的非 2xx 状态一视同仁重试，不使用状态码白名单。
-# 无效 API key、错误 URL、不支持模型等永久错误也可能延迟到接近 5 分钟才返回。
+# 只有 status_codes 中列出的 HTTP 状态才会重试；未列出的 HTTP 状态不会重试。
+# 默认不包含 403；配置者可按上游实际行为增删状态码，空列表表示不重试任何 HTTP 状态。
 retry:
   enabled: true
   max_attempts: 15
+  status_codes: [408, 409, 425, 429, 500, 502, 503, 504]
   initial_delay: 1s
   max_delay: 30s
   max_elapsed: 5m
