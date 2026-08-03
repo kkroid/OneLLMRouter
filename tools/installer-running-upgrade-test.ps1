@@ -51,9 +51,21 @@ function Invoke-SilentInstallerProcess {
     )
     $arguments = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") +
         $AdditionalArguments
-    $process = Start-Process -FilePath $Path -ArgumentList $arguments `
-        -WindowStyle Hidden -Wait -PassThru
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Path
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    foreach ($argument in $arguments) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
     try {
+        Write-Host "$Operation process: $Path"
+        if (-not $process.Start()) {
+            throw "Failed to start $Operation process"
+        }
+        $process.WaitForExit()
         if ($process.ExitCode -ne 0) {
             throw "$Operation failed with exit code $($process.ExitCode)"
         }

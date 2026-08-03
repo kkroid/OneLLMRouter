@@ -31,8 +31,7 @@ if ($integration -notmatch '\[Diagnostics\.Process\]::new\(\)' -or
     $integration -notmatch '\$originalTray\.ExitCode') {
     throw "Live installer upgrade test does not track the exact tray process"
 }
-if ($integration -notmatch 'Start-Process' -or
-    $integration -notmatch '-Wait\s+-PassThru' -or
+if ($integration -notmatch '\$process\.WaitForExit\(\)' -or
     $integration -notmatch '\$process\.ExitCode') {
     throw "Live installer upgrade test does not wait for installer exit codes"
 }
