@@ -76,9 +76,13 @@ function Invoke-SilentInstallerProcess {
 }
 
 function Invoke-Setup {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string[]]$AdditionalArguments = @()
+    )
+    $arguments = @('/TASKS=autostart') + $AdditionalArguments
     Invoke-SilentInstallerProcess -Path $Path -Operation "Setup" `
-        -AdditionalArguments @('/TASKS=autostart')
+        -AdditionalArguments $arguments
 }
 
 function Get-OptionalRegistryValue {
@@ -272,6 +276,16 @@ providers:
     $stable = Get-DynamicHealth -DynamicPort $port
     if ($null -eq $stable -or [int]$stable.pid -ne [int]$after.pid) {
         throw "Replacement core did not remain stable after the upgrade"
+    }
+
+    Invoke-Setup -Path $setupPath `
+        -AdditionalArguments @("/NORESTARTAPPLICATIONS")
+    Wait-DynamicPortClosed -DynamicPort $port
+    Assert-ConfigUnchanged -Path $configPath -ExpectedHash $configHash `
+        -Phase "Non-restarting upgrade"
+    if ((Get-OptionalRegistryValue -Path $runKey -Name $desktopValueName) -ne
+        $expectedRunValue) {
+        throw "Non-restarting upgrade changed the desktop autostart value"
     }
 
     Invoke-SilentInstallerProcess -Path $uninstaller -Operation "Uninstall"

@@ -38,7 +38,7 @@ if ($integration -notmatch '\$process\.WaitForExit\(\)' -or
     $integration -notmatch '\$process\.ExitCode') {
     throw "Live installer upgrade test does not wait for installer exit codes"
 }
-if ($integration -notmatch "-AdditionalArguments\s+@\('/TASKS=autostart'\)") {
+if ($integration -notmatch "@\('/TASKS=autostart'\)") {
     throw "Live installer upgrade test does not explicitly enable autostart"
 }
 if ($integration -notmatch '\$beforeCorePID' -or
@@ -56,6 +56,10 @@ if ($integration -notmatch 'Get-FileHash' -or
 }
 if ($integration -notmatch 'Running upgrade changed the desktop autostart value') {
     throw "Live installer upgrade test does not verify autostart after upgrade"
+}
+if ($integration -notmatch '/NORESTARTAPPLICATIONS' -or
+    $integration -notmatch 'Non-restarting upgrade changed the desktop autostart value') {
+    throw "Live installer upgrade test does not quiesce the installed tray before uninstall"
 }
 if ($integration -match '(?i)\bGet-Process\b|\bStop-Process\b|\btaskkill(?:\.exe)?\b') {
     throw "Live installer upgrade test must not enumerate or terminate processes by name"
