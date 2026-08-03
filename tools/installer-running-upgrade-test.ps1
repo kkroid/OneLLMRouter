@@ -78,7 +78,7 @@ function Invoke-SilentInstallerProcess {
 function Invoke-Setup {
     param([Parameter(Mandatory = $true)][string]$Path)
     Invoke-SilentInstallerProcess -Path $Path -Operation "Setup" `
-        -AdditionalArguments @('/TASKS="autostart"')
+        -AdditionalArguments @('/TASKS=autostart')
 }
 
 function Get-OptionalRegistryValue {

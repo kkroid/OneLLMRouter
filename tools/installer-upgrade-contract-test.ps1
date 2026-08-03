@@ -35,6 +35,9 @@ if ($integration -notmatch '\$process\.WaitForExit\(\)' -or
     $integration -notmatch '\$process\.ExitCode') {
     throw "Live installer upgrade test does not wait for installer exit codes"
 }
+if ($integration -notmatch "-AdditionalArguments\s+@\('/TASKS=autostart'\)") {
+    throw "Live installer upgrade test does not explicitly enable autostart"
+}
 if ($integration -notmatch '\$beforeCorePID' -or
     $integration -notmatch '-DifferentFromPID\s+\$beforeCorePID' -or
     $integration -notmatch '\$stable\.pid\s+-ne\s+\[int\]\$after\.pid') {
