@@ -65,7 +65,19 @@ func TestConfigInfoRequiresJSON(t *testing.T) {
 }
 
 func TestConfigInfoCommandPrintsValidatedSecretFreeJSON(t *testing.T) {
-	dir := t.TempDir()
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(workingDir, ".config-info-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("remove test directory: %v", err)
+		}
+	})
 	logDir := filepath.Join(dir, "logs")
 	configFile := filepath.Join(dir, "onellm-router.yaml")
 	configData := fmt.Sprintf(`server:
@@ -86,10 +98,6 @@ providers:
 		t.Fatal(err)
 	}
 
-	workingDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
 	relativeConfig, err := filepath.Rel(workingDir, configFile)
 	if err != nil {
 		t.Fatal(err)
