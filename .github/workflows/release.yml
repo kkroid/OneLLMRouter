@@ -103,7 +103,10 @@ jobs:
       - name: Build desktop and installer
         shell: pwsh
         run: |
-          $qtRoot = [IO.Path]::GetFullPath((Join-Path $env:Qt6_DIR "..\..\.."))
+          if ([string]::IsNullOrWhiteSpace($env:QT_ROOT_DIR)) {
+            throw "QT_ROOT_DIR was not set by install-qt-action"
+          }
+          $qtRoot = [IO.Path]::GetFullPath($env:QT_ROOT_DIR)
           pwsh -NoProfile -File .\build.ps1 -Version $env:RELEASE_VERSION -Installer -QtRoot $qtRoot -InnoSetup $env:INNO_SETUP
 
       - name: Run isolated desktop smoke test
