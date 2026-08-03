@@ -69,6 +69,22 @@ function Invoke-Setup {
         -AdditionalArguments @('/TASKS="autostart"')
 }
 
+function Get-OptionalRegistryValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    $values = Get-ItemProperty -Path $Path -ErrorAction SilentlyContinue
+    if ($null -eq $values) {
+        return $null
+    }
+    $property = $values.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
 function Get-DynamicHealth {
     param([Parameter(Mandatory = $true)][int]$DynamicPort)
     if ($ProtectedPorts -contains $DynamicPort) {
@@ -167,12 +183,12 @@ try {
     if (-not (Test-Path -LiteralPath $trayPath -PathType Leaf)) {
         throw "Installed tray executable is missing"
     }
-    if ($null -ne (Get-ItemPropertyValue -Path $runKey `
-            -Name $legacyValueName -ErrorAction SilentlyContinue)) {
+    if ($null -ne (Get-OptionalRegistryValue -Path $runKey `
+            -Name $legacyValueName)) {
         throw "Initial install left the legacy autostart value behind"
     }
     $expectedRunValue = """$trayPath"" --config ""$configPath"""
-    if ((Get-ItemPropertyValue -Path $runKey -Name $desktopValueName) -ne
+    if ((Get-OptionalRegistryValue -Path $runKey -Name $desktopValueName) -ne
         $expectedRunValue) {
         throw "Initial install did not create the expected desktop autostart value"
     }
@@ -230,7 +246,7 @@ providers:
     }
     Assert-ConfigUnchanged -Path $configPath -ExpectedHash $configHash `
         -Phase "Running upgrade"
-    if ((Get-ItemPropertyValue -Path $runKey -Name $desktopValueName) -ne
+    if ((Get-OptionalRegistryValue -Path $runKey -Name $desktopValueName) -ne
         $expectedRunValue) {
         throw "Running upgrade changed the desktop autostart value"
     }
@@ -251,10 +267,10 @@ providers:
     Wait-DynamicPortClosed -DynamicPort $port
     Assert-ConfigUnchanged -Path $configPath -ExpectedHash $configHash `
         -Phase "Uninstall"
-    if ($null -ne (Get-ItemPropertyValue -Path $runKey `
-            -Name $legacyValueName -ErrorAction SilentlyContinue) -or
-        $null -ne (Get-ItemPropertyValue -Path $runKey `
-            -Name $desktopValueName -ErrorAction SilentlyContinue)) {
+    if ($null -ne (Get-OptionalRegistryValue -Path $runKey `
+            -Name $legacyValueName) -or
+        $null -ne (Get-OptionalRegistryValue -Path $runKey `
+            -Name $desktopValueName)) {
         throw "Uninstall left an autostart value behind"
     }
 
