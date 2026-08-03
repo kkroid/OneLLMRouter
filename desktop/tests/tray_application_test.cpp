@@ -21,6 +21,7 @@ private slots:
     void explicitStopSuppressesAutoStartWhenStopRequestFails();
     void ownedHealthMustMatchChildPid();
     void selectsEnglishAndChineseStrings();
+    void distinguishesUnknownAndDisabledProxy();
     void rateLimitsIdenticalNotifications();
     void rebuildsMenuWhenAboutToShow();
     void detachedExternalBecomesControllableStoppedState();
@@ -131,9 +132,67 @@ void TrayApplicationTest::ownedHealthMustMatchChildPid()
 
 void TrayApplicationTest::selectsEnglishAndChineseStrings()
 {
-    QCOMPARE(stringsForLocale(QLocale(QLocale::English)).quit, QString("Quit"));
-    QCOMPARE(stringsForLocale(QLocale(QLocale::Chinese)).quit,
-             QString::fromUtf8("退出"));
+    const Strings english = stringsForLocale(QLocale(QLocale::English));
+    QCOMPARE(english.quit, QString("Quit"));
+    QCOMPARE(english.proxyUnknown, QString("Proxy: Unknown"));
+    QCOMPARE(english.proxyDisabled, QString("Proxy: Not configured"));
+    QCOMPARE(english.gracefulStopTimedOut,
+             QString("Graceful stop timed out"));
+
+    const Strings chinese = stringsForLocale(QLocale(QLocale::Chinese));
+    QCOMPARE(chinese.quit, QString::fromUtf8("退出"));
+    QCOMPARE(chinese.proxyUnknown, QString::fromUtf8("代理：未知"));
+    QCOMPARE(chinese.proxyDisabled, QString::fromUtf8("代理：未配置"));
+    QCOMPARE(chinese.gracefulStopTimedOut,
+             QString::fromUtf8("优雅停止超时"));
+}
+
+void TrayApplicationTest::distinguishesUnknownAndDisabledProxy()
+{
+    TrayApplication tray("C:/tmp/router.yaml", false);
+    auto *discovery = tray.findChild<RouterDiscovery *>();
+    QVERIFY(discovery);
+    QVERIFY(QMetaObject::invokeMethod(tray.menu(), "aboutToShow",
+                                      Qt::DirectConnection));
+
+    const Strings localized = stringsForLocale(QLocale::system());
+    bool foundUnknownProxy = false;
+    for (QAction *action : tray.menu()->actions()) {
+        foundUnknownProxy = foundUnknownProxy ||
+                            action->text() == localized.proxyUnknown;
+    }
+    QVERIFY(foundUnknownProxy);
+
+    RouterConfigInfo config;
+    config.valid = true;
+    config.port = 3456;
+    RouterHealth health;
+    health.valid = true;
+    health.pid = 42;
+    discovery->externalRouterFound(config, health);
+    QVERIFY(QMetaObject::invokeMethod(tray.menu(), "aboutToShow",
+                                      Qt::DirectConnection));
+
+    bool foundDisabledProxy = false;
+    bool foundUnreachableProxy = false;
+    for (QAction *action : tray.menu()->actions()) {
+        foundDisabledProxy = foundDisabledProxy ||
+                             action->text() == localized.proxyDisabled;
+        foundUnreachableProxy = foundUnreachableProxy ||
+                                action->text().contains(localized.unreachable);
+    }
+    QVERIFY(foundDisabledProxy);
+    QVERIFY(!foundUnreachableProxy);
+
+    discovery->configFailed("invalid configuration");
+    QVERIFY(QMetaObject::invokeMethod(tray.menu(), "aboutToShow",
+                                      Qt::DirectConnection));
+    foundUnknownProxy = false;
+    for (QAction *action : tray.menu()->actions()) {
+        foundUnknownProxy = foundUnknownProxy ||
+                            action->text() == localized.proxyUnknown;
+    }
+    QVERIFY(foundUnknownProxy);
 }
 
 void TrayApplicationTest::rateLimitsIdenticalNotifications()

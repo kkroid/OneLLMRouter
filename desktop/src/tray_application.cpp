@@ -124,7 +124,11 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
     connect(&m_menu, &QMenu::aboutToShow, this, &TrayApplication::rebuildMenu);
     m_trayIcon.setContextMenu(&m_menu);
     connect(&m_discovery, &RouterDiscovery::configFailed, this,
-            [this](const QString &) { setState(RouterState::Error); });
+            [this](const QString &) {
+                m_config = {};
+                m_proxyReachable = false;
+                setState(RouterState::Error);
+            });
     connect(&m_discovery, &RouterDiscovery::routerAbsent, this,
             [this](const RouterConfigInfo &config) {
                 m_config = config;
@@ -165,9 +169,13 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
     connect(&m_process, &RouterProcess::processStarted, this,
             [this](qint64) { QTimer::singleShot(250, this, &TrayApplication::discover); });
     connect(&m_process, &RouterProcess::gracefulStopTimedOut, this,
-            [this] { setState(RouterState::Error, QStringLiteral("Graceful stop timed out")); });
+            [this] { setState(RouterState::Error, m_strings.gracefulStopTimedOut); });
     connect(&m_proxyProbe, &ProxyProbe::probeFinished, this,
-            [this](const QString &, bool reachable) { m_proxyReachable = reachable; });
+            [this](const QString &address, bool reachable) {
+                if (address == m_config.proxySocks5) {
+                    m_proxyReachable = reachable;
+                }
+            });
     m_pollTimer.setInterval(2000);
     connect(&m_pollTimer, &QTimer::timeout, this, &TrayApplication::discover);
     if (activateRuntime) {
@@ -197,8 +205,15 @@ void TrayApplication::rebuildMenu()
                       stateText()));
     disabled(m_strings.modelsPort.arg(m_health.models)
                  .arg(m_config.port ? m_config.port : m_health.port));
-    disabled(m_strings.proxy.arg(m_config.proxySocks5.isEmpty() ? "-" : m_config.proxySocks5,
-                                 m_proxyReachable ? m_strings.reachable : m_strings.unreachable));
+    if (!m_config.valid) {
+        disabled(m_strings.proxyUnknown);
+    } else if (m_config.proxySocks5.isEmpty()) {
+        disabled(m_strings.proxyDisabled);
+    } else {
+        disabled(m_strings.proxy.arg(
+            m_config.proxySocks5,
+            m_proxyReachable ? m_strings.reachable : m_strings.unreachable));
+    }
     m_menu.addSeparator();
     const auto policy = trayActionPolicy(m_process.ownership(), m_state);
     if (policy.externalManaged) disabled(m_strings.externallyManaged);
