@@ -7,6 +7,9 @@ $workflow = Get-Content -LiteralPath $workflowPath -Raw
 if ($installer -notmatch '(?m)^CloseApplications=yes\s*$') {
     throw "Installer does not close applications during upgrade"
 }
+if ($installer -notmatch '(?m)^CloseApplicationsFilter=\{#AppExeName\}\s*$') {
+    throw "Installer does not limit Restart Manager shutdown to the tray"
+}
 if ($installer -notmatch '(?m)^RestartApplications=yes\s*$') {
     throw "Installer does not restart applications after upgrade"
 }

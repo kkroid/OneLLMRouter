@@ -23,6 +23,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
+CloseApplicationsFilter={#AppExeName}
 RestartApplications=yes
 UninstallDisplayIcon={app}\{#AppExeName}
 
