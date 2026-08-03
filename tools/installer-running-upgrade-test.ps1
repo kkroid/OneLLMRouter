@@ -43,12 +43,30 @@ if ($ProtectedPorts -contains $port) {
     throw "Dynamic test port $port is protected"
 }
 
+function Invoke-SilentInstallerProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Operation,
+        [string[]]$AdditionalArguments = @()
+    )
+    $arguments = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") +
+        $AdditionalArguments
+    $process = Start-Process -FilePath $Path -ArgumentList $arguments `
+        -WindowStyle Hidden -Wait -PassThru
+    try {
+        if ($process.ExitCode -ne 0) {
+            throw "$Operation failed with exit code $($process.ExitCode)"
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
 function Invoke-Setup {
     param([Parameter(Mandatory = $true)][string]$Path)
-    & $Path /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Setup failed with exit code $LASTEXITCODE"
-    }
+    Invoke-SilentInstallerProcess -Path $Path -Operation "Setup" `
+        -AdditionalArguments @('/TASKS="autostart"')
 }
 
 function Get-DynamicHealth {
@@ -228,10 +246,7 @@ providers:
         throw "Replacement core did not remain stable after the upgrade"
     }
 
-    & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-    if ($LASTEXITCODE -ne 0) {
-        throw "Uninstall failed with exit code $LASTEXITCODE"
-    }
+    Invoke-SilentInstallerProcess -Path $uninstaller -Operation "Uninstall"
     $uninstalled = $true
     Wait-DynamicPortClosed -DynamicPort $port
     Assert-ConfigUnchanged -Path $configPath -ExpectedHash $configHash `
@@ -249,7 +264,13 @@ providers:
 finally {
     if (-not $uninstalled -and
         (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
-        & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+        try {
+            Invoke-SilentInstallerProcess -Path $uninstaller `
+                -Operation "Cleanup uninstall"
+        }
+        catch {
+            Write-Warning $_
+        }
     }
     if ($null -ne $originalTray) {
         $originalTray.Dispose()
