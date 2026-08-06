@@ -65,7 +65,7 @@ git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter
 pwsh build.ps1
 ```
 
-便携版产物在 `dist/onellm-router-v1.4.0.exe`。
+便携版产物在 `dist/onellm-router-v1.4.1.exe`。
 
 构建桌面安装包还需要 Qt 6.8.3（MSVC 2022 x64）、CMake、MSVC 2022 和 Inno Setup 6：
 
@@ -74,7 +74,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-安装包输出到 `dist/OneLLMRouter-1.4.0-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
+安装包输出到 `dist/OneLLMRouter-1.4.1-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
 
 ### 2. 配置
 
@@ -144,7 +144,7 @@ model_slots:
 ### 3. 启动
 
 ```bash
-.\dist\onellm-router-v1.4.0.exe
+.\dist\onellm-router-v1.4.1.exe
 ```
 
 启动时会打印 Claude Code 的 `settings.json`，可直接用于配置客户端。

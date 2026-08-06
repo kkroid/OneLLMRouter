@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -52,6 +53,63 @@ func TestOpenAI_DirectNonStream(t *testing.T) {
 	m, _ := cs[0].(map[string]interface{})["message"].(map[string]interface{})
 	if m["content"] != "Hello" {
 		t.Errorf("expected Hello, got %v", m["content"])
+	}
+}
+
+func TestOpenAIDirectPreservesProviderSpecificFields(t *testing.T) {
+	var forwarded map[string]json.RawMessage
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&forwarded); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"chat_1","object":"chat.completion","model":"m1","choices":[],"usage":{}}`)
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", OpenAIBaseURL: mockAPI.URL, APIKey: "provider-secret", Models: []string{"m1[1m]"},
+	}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+	requestBody := `{
+		"model":"ds/m1[1m]",
+		"messages":[{"role":"user","content":"hi"}],
+		"response_format":{"type":"json_schema","json_schema":{"name":"probe","strict":true,"schema":{"type":"object"}}},
+		"thinking":{"type":"disabled"},
+		"tools":[{"type":"function","function":{"name":"emit","parameters":{"type":"object"},"strict":true}}],
+		"future_parameter":{"nested":[1,true,"x"]}
+	}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(requestBody))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeOpenAI(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	assertJSONFieldEqual(t, forwarded, "model", `"m1"`)
+	assertJSONFieldEqual(t, forwarded, "response_format", `{"type":"json_schema","json_schema":{"name":"probe","strict":true,"schema":{"type":"object"}}}`)
+	assertJSONFieldEqual(t, forwarded, "thinking", `{"type":"disabled"}`)
+	assertJSONFieldEqual(t, forwarded, "tools", `[{"type":"function","function":{"name":"emit","parameters":{"type":"object"},"strict":true}}]`)
+	assertJSONFieldEqual(t, forwarded, "future_parameter", `{"nested":[1,true,"x"]}`)
+}
+
+func assertJSONFieldEqual(t *testing.T, object map[string]json.RawMessage, field, wantJSON string) {
+	t.Helper()
+	gotRaw, ok := object[field]
+	if !ok {
+		t.Fatalf("forwarded request is missing %q", field)
+	}
+	var got any
+	if err := json.Unmarshal(gotRaw, &got); err != nil {
+		t.Fatalf("decode forwarded %s: %v", field, err)
+	}
+	var want any
+	if err := json.Unmarshal([]byte(wantJSON), &want); err != nil {
+		t.Fatalf("decode expected %s: %v", field, err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("forwarded %s = %s, want %s", field, gotRaw, wantJSON)
 	}
 }
 

@@ -52,7 +52,7 @@ Set-Location OneLLMRouter
 pwsh .\build.ps1
 ```
 
-The result is `dist/onellm-router-v1.4.0.exe`.
+The result is `dist/onellm-router-v1.4.1.exe`.
 
 Building the desktop Setup package also requires Qt 6.8.3 for MSVC 2022 x64, CMake, MSVC 2022, and Inno Setup 6:
 
@@ -61,7 +61,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-The installer is written to `dist/OneLLMRouter-1.4.0-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`.
+The installer is written to `dist/OneLLMRouter-1.4.1-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`.
 
 ## Configuration
 
@@ -134,7 +134,7 @@ Configured provider models take precedence over upstream discovery. When `models
 ## Run
 
 ```powershell
-.\dist\onellm-router-v1.4.0.exe
+.\dist\onellm-router-v1.4.1.exe
 ```
 
 The service prints the Claude Code environment block at startup. The main CLI commands are:

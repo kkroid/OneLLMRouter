@@ -2,6 +2,12 @@
 
 All notable user-facing changes to OneLLMRouter are documented here.
 
+## [1.4.1] - 2026-08-06
+
+### Fixed
+
+- OpenAI-compatible Chat Completions direct forwarding now preserves `response_format`, `thinking`, strict tool definitions, and future provider-specific fields while rewriting only the routed model name.
+
 ## [1.4.0] - 2026-08-03
 
 ### Added
@@ -29,4 +35,5 @@ All notable user-facing changes to OneLLMRouter are documented here.
 - Fixed tray-child shutdown, restart cancellation, startup failure handling, port conflicts, legacy autostart migration, and running-installer upgrades.
 - Fixed retry cancellation and timeout boundaries so client disconnects and service shutdown stop pending work without producing misleading upstream errors.
 
+[1.4.1]: https://github.com/kkroid/OneLLMRouter/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/kkroid/OneLLMRouter/compare/v1.3.2...v1.4.0

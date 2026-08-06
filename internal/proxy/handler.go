@@ -270,13 +270,22 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body translate.OpenAIRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	var envelope struct {
+		Model     string `json:"model"`
+		Stream    bool   `json:"stream,omitempty"`
+		MaxTokens int    `json:"max_tokens"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(rawBody)).Decode(&envelope); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
 	}
 
-	fullModel := body.Model
+	fullModel := envelope.Model
 	if fullModel == "" {
 		h.writeError(w, http.StatusBadRequest, "no model specified")
 		return
@@ -289,34 +298,42 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("unknown model: %s. Available: %s", fullModel, strings.Join(models, ", ")))
 		return
 	}
+	var translatedBody translate.OpenAIRequest
+	if resolved.Provider.OpenAIBaseURL == "" {
+		if err := json.NewDecoder(bytes.NewReader(rawBody)).Decode(&translatedBody); err != nil {
+			h.writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+			return
+		}
+	}
 
 	meta := onellmLog.RequestMetaFromContext(r.Context())
 	meta.Model = fullModel
 	meta.Provider = resolved.Provider.Prefix
-	meta.Stream = body.Stream
-	meta.MaxTokens = body.MaxTokens
+	meta.Stream = envelope.Stream
+	meta.MaxTokens = envelope.MaxTokens
 	w = &ttfbWriter{ResponseWriter: w, meta: meta}
 
 	if resolved.Provider.OpenAIBaseURL != "" {
-		body.Model = resolved.Model
-		h.openaiDirectHandler(w, r, &body, resolved)
+		h.openaiDirectHandler(w, r, rawBody, envelope.Stream, resolved)
 	} else {
-		h.openaiTranslateHandler(w, r, &body, resolved)
+		h.openaiTranslateHandler(w, r, &translatedBody, resolved)
 	}
 }
 
-func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, body *translate.OpenAIRequest, resolved *router.ResolveResult) {
-	body.Model = resolved.Model
-
+func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, rawBody []byte, stream bool, resolved *router.ResolveResult) {
 	url := strings.TrimRight(resolved.Provider.OpenAIBaseURL, "/") + "/v1/chat/completions"
 	client := h.clientFor(resolved.Provider)
 	// OpenAI API doesn't support anthropic [1m] suffix — strip from model name
-	body.Model = strings.TrimSuffix(body.Model, "[1m]")
+	model := strings.TrimSuffix(resolved.Model, "[1m]")
 
-	reqBody, _ := json.Marshal(body)
+	reqBody, err := rewriteOpenAIModel(rawBody, model)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
 	sanitizer := upstream.NewSanitizer(resolved.Provider.APIKey)
 	mode := upstream.Buffered
-	if body.Stream {
+	if stream {
 		mode = upstream.Headers
 	}
 	result, failure := h.upstreamExecutor().Do(
@@ -325,7 +342,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 		upstream.Metadata{
 			RequestID: onellmLog.RequestIDFromContext(r.Context()),
 			Provider:  resolved.Provider.Prefix,
-			Model:     body.Model,
+			Model:     model,
 			Endpoint:  string(router.EndpointOpenAI),
 		},
 		upstream.Options{
@@ -341,7 +358,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+resolved.Provider.APIKey)
-			if body.Stream {
+			if stream {
 				req.Header.Set("Accept", "text/event-stream")
 			}
 			return req, nil
@@ -359,7 +376,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 		return
 	}
 
-	if !body.Stream {
+	if !stream {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(result.Body)
@@ -375,7 +392,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
-	err := streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
+	err = streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
 		if _, err := io.WriteString(w, line); err != nil {
 			return err
 		}
@@ -387,6 +404,19 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, bo
 	if err != nil && h.Logger != nil {
 		h.Logger.Warn("openai direct stream", "error", err)
 	}
+}
+
+func rewriteOpenAIModel(rawBody []byte, model string) ([]byte, error) {
+	var request map[string]json.RawMessage
+	if err := json.NewDecoder(bytes.NewReader(rawBody)).Decode(&request); err != nil {
+		return nil, err
+	}
+	encodedModel, err := json.Marshal(model)
+	if err != nil {
+		return nil, err
+	}
+	request["model"] = encodedModel
+	return json.Marshal(request)
 }
 
 // openaiTranslateHandler translates OpenAI->Anthropic, proxies, then reverses.

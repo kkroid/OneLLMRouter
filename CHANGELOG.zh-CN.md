@@ -2,6 +2,12 @@
 
 这里记录 OneLLMRouter 面向使用者的重要变更。
 
+## [1.4.1] - 2026-08-06
+
+### 修复
+
+- OpenAI-compatible Chat Completions 直通转发现在仅改写路由后的模型名，并保留 `response_format`、`thinking`、严格工具定义及未来的 provider 特有字段。
+
 ## [1.4.0] - 2026-08-03
 
 ### 新增
@@ -29,4 +35,5 @@
 - 修复托盘子进程退出、重启取消、启动失败、端口冲突、旧开机自启迁移和运行中安装升级。
 - 修复重试取消和超时边界，客户端断开或服务关闭时会及时停止待处理工作，且不会生成误导性的上游错误。
 
+[1.4.1]: https://github.com/kkroid/OneLLMRouter/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/kkroid/OneLLMRouter/compare/v1.3.2...v1.4.0

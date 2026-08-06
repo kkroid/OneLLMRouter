@@ -141,13 +141,13 @@ OneLLMRouter/
 
 ```bash
 # 编译脚本（推荐）
-pwsh build.ps1 -Version "1.4.0"
+pwsh build.ps1 -Version "1.4.1"
 
 # 手动编译
-go build -ldflags="-s -w -X main.version=1.4.0" -o dist/onellm-router-v1.4.0.exe ./cmd/onellm-router/
+go build -ldflags="-s -w -X main.version=1.4.1" -o dist/onellm-router-v1.4.1.exe ./cmd/onellm-router/
 
 # 桌面版与 Setup（需要 QT_ROOT 和 Inno Setup 6）
-pwsh build.ps1 -Version "1.4.0" -Installer
+pwsh build.ps1 -Version "1.4.1" -Installer
 
 # 测试
 go test ./...
@@ -191,7 +191,7 @@ go test ./...
 
 ```bash
 # 1. 启动
-./dist/onellm-router-v1.4.0.exe
+./dist/onellm-router-v1.4.1.exe
 
 # 2. 健康检查
 curl http://localhost:3456/health

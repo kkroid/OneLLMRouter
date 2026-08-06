@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(OneLLMRouterDesktop VERSION 1.4.0 LANGUAGES CXX)
+project(OneLLMRouterDesktop VERSION 1.4.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
-set(ONELLM_VERSION "1.4.0" CACHE STRING "OneLLMRouter release version")
+set(ONELLM_VERSION "1.4.1" CACHE STRING "OneLLMRouter release version")
 
 include(CTest)
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
