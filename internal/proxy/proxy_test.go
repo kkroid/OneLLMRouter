@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/kkroid/onellm-router/internal/config"
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/upstream"
+	"github.com/kkroid/onellm-router/internal/usage"
 )
 
 // ==================== Test helpers ====================
@@ -21,6 +23,21 @@ import (
 type testStatusWriter struct {
 	http.ResponseWriter
 	status int
+}
+
+type usageRecordWriter struct {
+	records []usage.Record
+}
+
+type failingUsageWriter struct{}
+
+func (failingUsageWriter) Write(usage.Record) error {
+	return errors.New("usage persistence failed")
+}
+
+func (w *usageRecordWriter) Write(record usage.Record) error {
+	w.records = append(w.records, record)
+	return nil
 }
 
 func (w *testStatusWriter) WriteHeader(code int) {
@@ -217,6 +234,115 @@ func TestAnthropicNonStreamRetriesWithRebuiltRequest(t *testing.T) {
 	}
 	if strings.Contains(requestBodies[0], "ds/m1") || !strings.Contains(requestBodies[0], `"model":"m1"`) {
 		t.Fatalf("model was not rewritten once before retries: %s", requestBodies[0])
+	}
+}
+
+func TestAnthropicUsageCollectionRecordsEachRetryAttempt(t *testing.T) {
+	var calls int
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusBadGateway)
+			io.WriteString(w, `{"error":{"message":"temporary"},"usage":{"input_tokens":2,"output_tokens":0}}`)
+			return
+		}
+		io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"m1","content":[],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":4}}`)
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"}}})
+	writer := &usageRecordWriter{}
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	handler.Usage = usage.NewCollector(writer)
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || len(writer.records) != 2 {
+		t.Fatalf("status = %d, records = %+v", recorder.Code, writer.records)
+	}
+	if writer.records[0].Status != usage.StatusError || writer.records[0].UpstreamAttempt != 1 || writer.records[0].OutputTokens == nil || *writer.records[0].OutputTokens != 0 {
+		t.Fatalf("first record = %+v", writer.records[0])
+	}
+	if writer.records[1].Status != usage.StatusSuccess || writer.records[1].UpstreamAttempt != 2 || writer.records[1].InputTokens == nil || *writer.records[1].InputTokens != 3 {
+		t.Fatalf("second record = %+v", writer.records[1])
+	}
+}
+
+func TestAnthropicStreamUsageCollectionRequiresTerminalEvent(t *testing.T) {
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5}}}\n\n")
+		io.WriteString(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":6}}\n\n")
+	}))
+	defer mockAPI.Close()
+	resolver := router.NewResolver([]router.Provider{{Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"}}})
+	writer := &usageRecordWriter{}
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+	handler.Usage = usage.NewCollector(writer)
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","stream":true,"messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if len(writer.records) != 1 || writer.records[0].InputTokens == nil || *writer.records[0].InputTokens != 5 || writer.records[0].OutputTokens == nil || *writer.records[0].OutputTokens != 6 {
+		t.Fatalf("records = %+v", writer.records)
+	}
+}
+
+func TestAnthropicStreamRetryHasSingleRecordOwnerPerAttempt(t *testing.T) {
+	var calls int
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusBadGateway)
+			io.WriteString(w, `{"usage":{"input_tokens":1,"output_tokens":0}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":2}}}\n\n")
+		io.WriteString(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3}}\n\n")
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"}}})
+	writer := &usageRecordWriter{}
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	handler.Usage = usage.NewCollector(writer)
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","stream":true,"messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || len(writer.records) != 2 {
+		t.Fatalf("status = %d, records = %+v", recorder.Code, writer.records)
+	}
+	if writer.records[0].UpstreamAttempt != 1 || writer.records[0].Status != usage.StatusError || writer.records[1].UpstreamAttempt != 2 || writer.records[1].Status != usage.StatusSuccess {
+		t.Fatalf("records = %+v", writer.records)
+	}
+}
+
+func TestUsagePersistenceFailureDoesNotAlterSuccessfulResponse(t *testing.T) {
+	wantBody := `{"id":"x","type":"message","role":"assistant","model":"m1","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, wantBody)
+	}))
+	defer mockAPI.Close()
+	resolver := router.NewResolver([]router.Provider{{Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"}}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+	handler.Usage = usage.NewCollector(failingUsageWriter{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != wantBody {
+		t.Fatalf("status = %d, body = %q", recorder.Code, recorder.Body.String())
 	}
 }
 

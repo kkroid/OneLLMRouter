@@ -14,6 +14,7 @@ import (
 
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/upstream"
+	"github.com/kkroid/onellm-router/internal/usage"
 )
 
 // ==================== OpenAI direct passthrough routing ====================
@@ -54,6 +55,87 @@ func TestOpenAI_DirectNonStream(t *testing.T) {
 	m, _ := cs[0].(map[string]interface{})["message"].(map[string]interface{})
 	if m["content"] != "Hello" {
 		t.Errorf("expected Hello, got %v", m["content"])
+	}
+}
+
+func TestOpenAIUsageCollectionDirectAndTranslated(t *testing.T) {
+	t.Run("direct explicit zero", func(t *testing.T) {
+		mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, `{"id":"x","choices":[],"usage":{"prompt_tokens":0,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":1}}}`)
+		}))
+		defer mockAPI.Close()
+		resolver := router.NewResolver([]router.Provider{{Prefix: "oai", OpenAIBaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"}}})
+		writer := &usageRecordWriter{}
+		handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+		handler.Usage = usage.NewCollector(writer)
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"oai/m1","messages":[]}`))
+		handler.ServeOpenAI(httptest.NewRecorder(), request)
+		record := writer.records[0]
+		if record.InputTokens == nil || *record.InputTokens != 0 || record.CacheReadTokens == nil || *record.CacheReadTokens != 0 || record.ReasoningTokens == nil || *record.ReasoningTokens != 1 {
+			t.Fatalf("record = %+v", record)
+		}
+	})
+
+	t.Run("translated preserves upstream fields", func(t *testing.T) {
+		mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, `{"id":"x","type":"message","role":"assistant","model":"m1","content":[],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":4,"cache_read_input_tokens":2,"cache_creation_input_tokens":1}}`)
+		}))
+		defer mockAPI.Close()
+		resolver := router.NewResolver([]router.Provider{{Prefix: "ant", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"}}})
+		writer := &usageRecordWriter{}
+		handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+		handler.Usage = usage.NewCollector(writer)
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"ant/m1","messages":[]}`))
+		handler.ServeOpenAI(httptest.NewRecorder(), request)
+		record := writer.records[0]
+		if record.UsageSource == nil || *record.UsageSource != usage.SourceTranslatedResponse || record.CacheReadTokens == nil || *record.CacheReadTokens != 2 || record.CacheWriteTokens == nil || *record.CacheWriteTokens != 1 {
+			t.Fatalf("record = %+v", record)
+		}
+	})
+}
+
+func TestOpenAIUsageCollectionStreamingPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider func(string) router.Provider
+		stream   string
+	}{
+		{
+			name: "direct OpenAI",
+			provider: func(url string) router.Provider {
+				return router.Provider{Prefix: "p", OpenAIBaseURL: url, APIKey: "secret", Models: []string{"m1"}}
+			},
+			stream: "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+		},
+		{
+			name: "translated Anthropic",
+			provider: func(url string) router.Provider {
+				return router.Provider{Prefix: "p", BaseURL: url, APIKey: "secret", Models: []string{"m1"}}
+			},
+			stream: "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0}}}\n\n" +
+				"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":4}}\n\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				io.WriteString(w, test.stream)
+			}))
+			defer mockAPI.Close()
+			resolver := router.NewResolver([]router.Provider{test.provider(mockAPI.URL)})
+			writer := &usageRecordWriter{}
+			handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+			handler.Usage = usage.NewCollector(writer)
+			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"p/m1","stream":true,"messages":[]}`))
+			recorder := httptest.NewRecorder()
+
+			handler.ServeOpenAI(recorder, request)
+
+			if recorder.Body.String() != test.stream || len(writer.records) != 1 || writer.records[0].InputTokens == nil || *writer.records[0].InputTokens != 0 || writer.records[0].OutputTokens == nil || *writer.records[0].OutputTokens != 4 {
+				t.Fatalf("body = %q, records = %+v", recorder.Body.String(), writer.records)
+			}
+		})
 	}
 }
 

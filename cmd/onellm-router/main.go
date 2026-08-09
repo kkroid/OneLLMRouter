@@ -26,6 +26,7 @@ import (
 	"github.com/kkroid/onellm-router/internal/proxy"
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/upstream"
+	"github.com/kkroid/onellm-router/internal/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -144,6 +145,7 @@ func serveCmd() *cobra.Command {
 			}
 			retryExecutor := upstream.NewExecutor(cfg.Retry, logger)
 			proxyHandler := proxy.NewHandler(resolver, httpClient, directClient, logger, retryExecutor)
+			proxyHandler.Usage = usage.NewCollector(usage.NewStore("", logger))
 			proxyHandler.Catalog.SetReasoningMappings(codexReasoningMappings(cfg.Codex.Models))
 
 			logger.Info("onellm-router starting",

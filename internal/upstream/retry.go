@@ -49,6 +49,18 @@ func AttemptIdentityFromContext(ctx context.Context) (AttemptIdentity, bool) {
 // close the response body and apply the normal retry policy.
 type ResponseProbe func(context.Context, *http.Response) *Failure
 
+// AttemptObservation reports the completed outcome of one request sent upstream.
+type AttemptObservation struct {
+	Identity     AttemptIdentity
+	StatusCode   int
+	Body         []byte
+	BodyComplete bool
+	FailureKind  FailureKind
+}
+
+// AttemptObserver observes completed upstream attempts without affecting retry decisions.
+type AttemptObserver func(AttemptObservation)
+
 type Metadata struct {
 	RequestID string
 	Provider  string
@@ -62,6 +74,7 @@ type Options struct {
 	SuccessBodyLimit  int64
 	Sanitizer         *Sanitizer
 	Probe             ResponseProbe
+	AttemptObserver   AttemptObserver
 }
 
 type Result struct {
@@ -142,6 +155,10 @@ func (e *Executor) Do(
 	}
 	inferenceClient := inferenceClient(client)
 	var lastFailure *Failure
+	var observations []AttemptObservation
+	defer func() {
+		notifyAttemptObserver(options.AttemptObserver, observations)
+	}()
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := context.Cause(ctx); err != nil {
@@ -189,8 +206,10 @@ func (e *Executor) Do(
 				}
 				release()
 				if failure == nil {
+					observations = appendAttemptObservation(observations, metadata.RequestID, attempt, response.StatusCode, result.Body, true, "")
 					return e.completeSuccess(ctx, metadata, maxAttempts, result, lastFailure)
 				}
+				observations = appendAttemptObservation(observations, metadata.RequestID, attempt, response.StatusCode, nil, false, failure.Kind)
 				if failure.Kind == FailureProtocol {
 					e.logAttemptFailure(metadata, maxAttempts, failure, 0, options.Sanitizer)
 					return e.completeFailure(ctx, metadata, maxAttempts, options.Sanitizer, failure)
@@ -211,6 +230,7 @@ func (e *Executor) Do(
 						_ = response.Body.Close()
 					}
 					probeFailure = e.normalizeProbeFailure(started, attempt, attemptContext, probeFailure)
+					observations = appendAttemptObservation(observations, metadata.RequestID, attempt, response.StatusCode, nil, false, probeFailure.Kind)
 					release()
 					if probeFailure.Kind == FailureProtocol {
 						e.logAttemptFailure(metadata, maxAttempts, probeFailure, 0, options.Sanitizer)
@@ -226,6 +246,7 @@ func (e *Executor) Do(
 					}
 					release()
 					lastFailure = e.contextFailure(started, attempt, cause)
+					observations = appendAttemptObservation(observations, metadata.RequestID, attempt, response.StatusCode, nil, false, lastFailure.Kind)
 					response = nil
 					if isCancellationFailure(lastFailure) {
 						return e.completeFailure(ctx, metadata, maxAttempts, options.Sanitizer, lastFailure)
@@ -255,6 +276,11 @@ func (e *Executor) Do(
 				}
 			}
 			lastFailure = e.attemptFailure(started, attempt, attemptContext, response, requestErr, failureBody, failureBodyComplete, options.Sanitizer)
+			statusCode := 0
+			if response != nil {
+				statusCode = response.StatusCode
+			}
+			observations = appendAttemptObservation(observations, metadata.RequestID, attempt, statusCode, failureBody, failureBodyComplete, lastFailure.Kind)
 			release()
 			if isCancellationFailure(lastFailure) {
 				return e.completeFailure(ctx, metadata, maxAttempts, options.Sanitizer, lastFailure)
@@ -290,6 +316,30 @@ func (e *Executor) Do(
 	}
 
 	panic("unreachable")
+}
+
+func appendAttemptObservation(observations []AttemptObservation, requestID string, attempt, statusCode int, body []byte, bodyComplete bool, failureKind FailureKind) []AttemptObservation {
+	return append(observations, AttemptObservation{
+		Identity:     AttemptIdentity{RequestID: requestID, UpstreamAttempt: attempt},
+		StatusCode:   statusCode,
+		Body:         append([]byte(nil), body...),
+		BodyComplete: bodyComplete,
+		FailureKind:  failureKind,
+	})
+}
+
+func notifyAttemptObserver(observer AttemptObserver, observations []AttemptObservation) {
+	if observer == nil {
+		return
+	}
+	for _, observation := range observations {
+		func() {
+			defer func() {
+				_ = recover()
+			}()
+			observer(observation)
+		}()
+	}
 }
 
 func (e *Executor) completeSuccess(

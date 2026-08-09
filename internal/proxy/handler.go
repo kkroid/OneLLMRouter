@@ -17,6 +17,7 @@ import (
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/translate"
 	"github.com/kkroid/onellm-router/internal/upstream"
+	"github.com/kkroid/onellm-router/internal/usage"
 )
 
 // Handler dispatches Anthropic API requests to providers.
@@ -27,6 +28,7 @@ type Handler struct {
 	Logger       *slog.Logger
 	Catalog      *catalog.Service
 	Upstream     *upstream.Executor
+	Usage        *usage.Collector
 }
 
 // NewHandler creates a proxy Handler.
@@ -112,6 +114,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // externalHandler proxies requests to external Anthropic-compatible APIs (direct passthrough).
 func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *translate.AnthropicRequest, resolved *router.ResolveResult) {
+	requestedModel := body.Model
 	body.Model = resolved.Model
 
 	baseURL := strings.TrimRight(resolved.Provider.BaseURL, "/")
@@ -142,6 +145,7 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 			PerAttemptTimeout: timeout,
 			SuccessBodyLimit:  successBodyLimit,
 			Sanitizer:         sanitizer,
+			AttemptObserver:   h.usageAttemptObserver(r, resolved, requestedModel, resolved.Model, usage.ProtocolAnthropicMessages, usage.SourceResponse),
 		},
 		func(ctx context.Context) (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
@@ -180,6 +184,7 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 	// Streaming — direct SSE passthrough
 	resp := result.Response
 	defer resp.Body.Close()
+	streamUsage := h.usageStream(r, resolved, requestedModel, resolved.Model, usage.ProtocolAnthropicMessages, result.Attempts)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -187,6 +192,7 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 
 	flusher, _ := w.(http.Flusher)
 	err := streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
+		_, _ = streamUsage.Write([]byte(line))
 		if _, err := io.WriteString(w, line); err != nil {
 			return err
 		}
@@ -195,6 +201,7 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 		}
 		return nil
 	})
+	streamUsage.Finish(usageStatus(r.Context(), err))
 	if err != nil && h.Logger != nil {
 		h.Logger.Warn("external stream", "error", err)
 	}
@@ -353,6 +360,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, ra
 			PerAttemptTimeout: openAIRequestTimeout(),
 			SuccessBodyLimit:  0,
 			Sanitizer:         sanitizer,
+			AttemptObserver:   h.usageAttemptObserver(r, resolved, requestModel(r), model, usage.ProtocolOpenAIChat, usage.SourceResponse),
 		},
 		func(ctx context.Context) (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
@@ -392,6 +400,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, ra
 	// Streaming: byte-for-byte SSE passthrough
 	resp := result.Response
 	defer resp.Body.Close()
+	streamUsage := h.usageStream(r, resolved, requestModel(r), model, usage.ProtocolOpenAIChat, result.Attempts)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -399,6 +408,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, ra
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 	err = streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
+		_, _ = streamUsage.Write([]byte(line))
 		if _, err := io.WriteString(w, line); err != nil {
 			return err
 		}
@@ -407,6 +417,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, ra
 		}
 		return nil
 	})
+	streamUsage.Finish(usageStatus(r.Context(), err))
 	if err != nil && h.Logger != nil {
 		h.Logger.Warn("openai direct stream", "error", err)
 	}
@@ -428,6 +439,7 @@ func rewriteOpenAIModel(rawBody []byte, model string) ([]byte, error) {
 // openaiTranslateHandler translates OpenAI->Anthropic, proxies, then reverses.
 // Fallback for providers without openai_base_url.
 func (h *Handler) openaiTranslateHandler(w http.ResponseWriter, r *http.Request, body *translate.OpenAIRequest, resolved *router.ResolveResult) {
+	requestedModel := body.Model
 	body.Model = resolved.Model
 
 	anthropicReq, err := translate.ReverseTranslateRequest(body)
@@ -461,6 +473,7 @@ func (h *Handler) openaiTranslateHandler(w http.ResponseWriter, r *http.Request,
 			PerAttemptTimeout: openAIRequestTimeout(),
 			SuccessBodyLimit:  0,
 			Sanitizer:         sanitizer,
+			AttemptObserver:   h.usageAttemptObserver(r, resolved, requestedModel, body.Model, usage.ProtocolAnthropicMessages, usage.SourceTranslatedResponse),
 		},
 		func(ctx context.Context) (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
@@ -501,6 +514,7 @@ func (h *Handler) openaiTranslateHandler(w http.ResponseWriter, r *http.Request,
 	// Streaming: Anthropic SSE passthrough
 	resp := result.Response
 	defer resp.Body.Close()
+	streamUsage := h.usageStream(r, resolved, requestedModel, body.Model, usage.ProtocolAnthropicMessages, result.Attempts)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -508,6 +522,7 @@ func (h *Handler) openaiTranslateHandler(w http.ResponseWriter, r *http.Request,
 
 	flusher, _ := w.(http.Flusher)
 	err = streamLines(resp.Body, streamFirstEventTimeout(), streamIdleTimeout(), func(line string) error {
+		_, _ = streamUsage.Write([]byte(line))
 		if _, err := io.WriteString(w, line); err != nil {
 			return err
 		}
@@ -516,6 +531,7 @@ func (h *Handler) openaiTranslateHandler(w http.ResponseWriter, r *http.Request,
 		}
 		return nil
 	})
+	streamUsage.Finish(usageStatus(r.Context(), err))
 	if err != nil && h.Logger != nil {
 		h.Logger.Warn("openai translate stream", "error", err, "request_id", onellmLog.RequestIDFromContext(r.Context()))
 	}
@@ -599,6 +615,7 @@ func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request,
 			SuccessBodyLimit:  0,
 			Sanitizer:         sanitizer,
 			Probe:             probe,
+			AttemptObserver:   h.usageAttemptObserver(r, resolved, requestModel(r), resolved.Model, usage.ProtocolOpenAIResponses, usage.SourceResponse),
 		},
 		func(ctx context.Context) (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawBody))
@@ -647,6 +664,7 @@ func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request,
 
 	resp := result.Response
 	defer resp.Body.Close()
+	streamUsage := h.usageStream(r, resolved, requestModel(r), resolved.Model, usage.ProtocolOpenAIResponses, result.Attempts)
 	for key, values := range resp.Header {
 		for _, value := range values {
 			w.Header().Add(key, value)
@@ -658,7 +676,8 @@ func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request,
 
 	flusher, _ := w.(http.Flusher)
 	meta.UpstreamStage = "stream"
-	_, err := io.Copy(flushWriter{writer: w, flusher: flusher, meta: meta}, resp.Body)
+	_, err := io.Copy(flushWriter{writer: w, flusher: flusher, meta: meta}, io.TeeReader(resp.Body, streamUsage))
+	streamUsage.Finish(usageStatus(r.Context(), err))
 	meta.MarkStreamFinish()
 	if err != nil {
 		meta.Error = err.Error()
@@ -675,6 +694,63 @@ func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	meta.EndReason = "ok"
+}
+
+func (h *Handler) usageAttemptObserver(r *http.Request, resolved *router.ResolveResult, requestedModel, upstreamModel string, protocol usage.Protocol, source usage.Source) upstream.AttemptObserver {
+	if h.Usage == nil {
+		return nil
+	}
+	return func(observation upstream.AttemptObservation) {
+		attempt := usage.Attempt{
+			RequestID:       observation.Identity.RequestID,
+			Provider:        resolved.Provider.Prefix,
+			RequestedModel:  requestedModel,
+			UpstreamModel:   upstreamModel,
+			Protocol:        protocol,
+			UpstreamAttempt: observation.Identity.UpstreamAttempt,
+		}
+		status := usage.StatusSuccess
+		if observation.FailureKind != "" {
+			status = usage.StatusError
+			if observation.FailureKind == upstream.FailureClientCancel || observation.FailureKind == upstream.FailureServiceShutdown {
+				status = usage.StatusCancelled
+			}
+		}
+		if observation.BodyComplete {
+			h.Usage.CollectResponse(attempt, observation.Body, source, status)
+			return
+		}
+		h.Usage.CollectUnknown(attempt, status)
+	}
+}
+
+func (h *Handler) usageStream(r *http.Request, resolved *router.ResolveResult, requestedModel, upstreamModel string, protocol usage.Protocol, upstreamAttempt int) *usage.StreamCollector {
+	collector := h.Usage
+	if collector == nil {
+		collector = usage.NewCollector(nil)
+	}
+	return collector.NewStream(usage.Attempt{
+		RequestID:       onellmLog.RequestIDFromContext(r.Context()),
+		Provider:        resolved.Provider.Prefix,
+		RequestedModel:  requestedModel,
+		UpstreamModel:   upstreamModel,
+		Protocol:        protocol,
+		UpstreamAttempt: upstreamAttempt,
+	})
+}
+
+func requestModel(r *http.Request) string {
+	return onellmLog.RequestMetaFromContext(r.Context()).Model
+}
+
+func usageStatus(ctx context.Context, streamErr error) usage.Status {
+	if errors.Is(context.Cause(ctx), upstream.ErrServiceShutdown) || ctx.Err() != nil {
+		return usage.StatusCancelled
+	}
+	if streamErr != nil {
+		return usage.StatusError
+	}
+	return usage.StatusSuccess
 }
 
 func (h *Handler) ServeModelList(w http.ResponseWriter, r *http.Request, endpointType router.EndpointType) {

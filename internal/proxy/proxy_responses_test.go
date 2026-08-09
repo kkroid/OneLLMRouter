@@ -16,6 +16,7 @@ import (
 	onellmLog "github.com/kkroid/onellm-router/internal/log"
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/upstream"
+	"github.com/kkroid/onellm-router/internal/usage"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -97,6 +98,49 @@ func TestResponses_DirectNonStream(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"object":"response"`) {
 		t.Errorf("expected response object, got %s", w.Body.String())
+	}
+}
+
+func TestResponsesStreamUsageCollectionPreservesBytes(t *testing.T) {
+	stream := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":8,\"input_tokens_details\":{\"cached_tokens\":2},\"output_tokens_details\":{\"reasoning_tokens\":3}}}}\n\n"
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, stream)
+	}))
+	defer mockAPI.Close()
+	resolver := router.NewResolver([]router.Provider{{Prefix: "oai", ResponsesBaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"gpt-5"}}})
+	writer := &usageRecordWriter{}
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+	handler.Usage = usage.NewCollector(writer)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","stream":true,"input":"hi"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Body.String() != stream {
+		t.Fatalf("stream changed:\n%s", recorder.Body.String())
+	}
+	if len(writer.records) != 1 || writer.records[0].ReasoningTokens == nil || *writer.records[0].ReasoningTokens != 3 || writer.records[0].CacheReadTokens == nil || *writer.records[0].CacheReadTokens != 2 {
+		t.Fatalf("records = %+v", writer.records)
+	}
+}
+
+func TestResponsesNonStreamUsageCollection(t *testing.T) {
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"id":"resp_1","object":"response","output":[],"usage":{"input_tokens":0,"output_tokens":2}}`)
+	}))
+	defer mockAPI.Close()
+	resolver := router.NewResolver([]router.Provider{{Prefix: "oai", ResponsesBaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"gpt-5"}}})
+	writer := &usageRecordWriter{}
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+	handler.Usage = usage.NewCollector(writer)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","input":"hi"}`))
+
+	handler.ServeResponses(httptest.NewRecorder(), request)
+
+	if len(writer.records) != 1 || writer.records[0].InputTokens == nil || *writer.records[0].InputTokens != 0 || writer.records[0].OutputTokens == nil || *writer.records[0].OutputTokens != 2 {
+		t.Fatalf("records = %+v", writer.records)
 	}
 }
 

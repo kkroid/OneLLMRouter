@@ -93,6 +93,159 @@ func TestRetryExposesStableOneBasedAttemptIdentity(t *testing.T) {
 	}
 }
 
+func TestAttemptObserverOwnsFailedAndBufferedAttemptsOnly(t *testing.T) {
+	t.Run("failed and buffered success", func(t *testing.T) {
+		policy := retryPolicy()
+		policy.MaxAttempts = 2
+		executor, _ := newTestExecutor(policy)
+		var calls int
+		var observations []AttemptObservation
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			status := http.StatusBadGateway
+			body := `{"usage":{"input_tokens":1}}`
+			if calls == 2 {
+				status = http.StatusOK
+				body = `{"usage":{"input_tokens":2}}`
+			}
+			return &http.Response{
+				StatusCode: status,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		})}
+
+		result, failure := executor.Do(context.Background(), client, Metadata{RequestID: "request-1"}, Options{
+			Mode:            Buffered,
+			AttemptObserver: func(observation AttemptObservation) { observations = append(observations, observation) },
+		}, testRequestFactory())
+
+		if failure != nil || result == nil || len(observations) != 2 {
+			t.Fatalf("result = %+v, failure = %+v, observations = %+v", result, failure, observations)
+		}
+		if observations[0].Identity.UpstreamAttempt != 1 || observations[0].FailureKind != FailureHTTP || string(observations[0].Body) != `{"usage":{"input_tokens":1}}` {
+			t.Fatalf("failed observation = %+v", observations[0])
+		}
+		if observations[1].Identity.UpstreamAttempt != 2 || observations[1].FailureKind != "" || string(observations[1].Body) != `{"usage":{"input_tokens":2}}` {
+			t.Fatalf("success observation = %+v", observations[1])
+		}
+	})
+
+	t.Run("accepted stream headers", func(t *testing.T) {
+		executor, _ := newTestExecutor(retryPolicy())
+		var observations []AttemptObservation
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return testResponse(http.StatusOK), nil
+		})}
+		result, failure := executor.Do(context.Background(), client, Metadata{RequestID: "request-2"}, Options{
+			Mode:            Headers,
+			AttemptObserver: func(observation AttemptObservation) { observations = append(observations, observation) },
+		}, testRequestFactory())
+		if failure != nil || result == nil {
+			t.Fatalf("result = %+v, failure = %+v", result, failure)
+		}
+		defer result.Response.Body.Close()
+		if len(observations) != 0 {
+			t.Fatalf("accepted streaming observations = %+v, want none", observations)
+		}
+	})
+}
+
+func TestAttemptObserverLatencyDoesNotAffectRetryOutcome(t *testing.T) {
+	policy := retryPolicy()
+	policy.MaxAttempts = 3
+	policy.MaxElapsed = config.Duration(10 * time.Second)
+	executor := NewExecutor(policy)
+	fakeNow := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	var waits []time.Duration
+	executor.now = func() time.Time { return fakeNow }
+	executor.wait = func(_ context.Context, delay time.Duration) error {
+		waits = append(waits, delay)
+		fakeNow = fakeNow.Add(delay)
+		return nil
+	}
+	executor.jitter = func() float64 { return 0.5 }
+	var calls int
+	var observations int
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		if calls < 3 {
+			return testResponse(http.StatusBadGateway), nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("success body")),
+		}, nil
+	})}
+
+	result, failure := executor.Do(context.Background(), client, Metadata{RequestID: "request-latency"}, Options{
+		Mode: Buffered,
+		AttemptObserver: func(AttemptObservation) {
+			observations++
+			fakeNow = fakeNow.Add(time.Hour)
+		},
+	}, testRequestFactory())
+
+	if failure != nil || result == nil || result.Attempts != 3 || result.Elapsed != 3*time.Second {
+		t.Fatalf("result = %+v, failure = %+v", result, failure)
+	}
+	if calls != 3 || observations != 3 || !reflect.DeepEqual(waits, []time.Duration{time.Second, 2 * time.Second}) {
+		t.Fatalf("calls = %d, observations = %d, waits = %v", calls, observations, waits)
+	}
+	if string(result.Body) != "success body" {
+		t.Fatalf("body = %q", result.Body)
+	}
+}
+
+func TestAttemptObserverPanicDoesNotAffectResultOrFailure(t *testing.T) {
+	t.Run("buffered success", func(t *testing.T) {
+		policy := retryPolicy()
+		policy.MaxAttempts = 2
+		executor, waits := newTestExecutor(policy)
+		var calls int
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			if calls == 1 {
+				return testResponse(http.StatusBadGateway), nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("original success")),
+			}, nil
+		})}
+
+		result, failure := executor.Do(context.Background(), client, Metadata{}, Options{
+			Mode: Buffered,
+			AttemptObserver: func(observation AttemptObservation) {
+				if len(observation.Body) > 0 {
+					observation.Body[0] = 'X'
+				}
+				panic("observer panic")
+			},
+		}, testRequestFactory())
+
+		if failure != nil || result == nil || result.Attempts != 2 || string(result.Body) != "original success" || !reflect.DeepEqual(*waits, []time.Duration{time.Second}) {
+			t.Fatalf("result = %+v, failure = %+v, waits = %v", result, failure, *waits)
+		}
+	})
+
+	t.Run("exhausted failure", func(t *testing.T) {
+		policy := retryPolicy()
+		policy.MaxAttempts = 2
+		executor, waits := newTestExecutor(policy)
+		_, failure := executor.Do(context.Background(), failingClient(http.StatusBadGateway, nil), Metadata{}, Options{
+			Mode:            Buffered,
+			AttemptObserver: func(AttemptObservation) { panic("observer panic") },
+		}, testRequestFactory())
+
+		if failure == nil || failure.Attempts != 2 || failure.StatusCode != http.StatusBadGateway || !reflect.DeepEqual(*waits, []time.Duration{time.Second}) {
+			t.Fatalf("failure = %+v, waits = %v", failure, *waits)
+		}
+	})
+}
+
 func TestRetryDisabledCallsOnceWithoutWaiting(t *testing.T) {
 	policy := retryPolicy()
 	policy.Enabled = false
