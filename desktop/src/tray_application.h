@@ -17,6 +17,7 @@ struct TrayActionPolicy {
 };
 
 class QSettings;
+class MainWindow;
 
 TrayActionPolicy trayActionPolicy(ProcessOwnership ownership, RouterState state);
 bool shouldAutoStartRouter(ProcessOwnership ownership, bool autoStartAllowed);
@@ -45,9 +46,11 @@ public:
     explicit TrayApplication(QString configPath, bool activateRuntime = true,
                              QObject *parent = nullptr);
     QMenu *menu();
+    MainWindow *mainWindow() const;
 
 private slots:
     void stopOwned();
+    void openMainWindow();
 
 private:
     void rebuildMenu();
@@ -72,4 +75,5 @@ private:
     RouterState m_state = RouterState::Stopped;
     bool m_proxyReachable = false;
     bool m_autoStartAllowed = true;
+    MainWindow *m_mainWindow = nullptr;
 };

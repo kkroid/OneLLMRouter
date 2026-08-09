@@ -1,5 +1,6 @@
 #include "tray_application.h"
 #include "platform/platform.h"
+#include "main_window.h"
 
 #include <QAction>
 #include <QCoreApplication>
@@ -118,6 +119,7 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
                 m_config = config;
                 if (m_process.ownership() == ProcessOwnership::External) {
                     m_process.detachExternal();
+                    if (m_mainWindow) m_mainWindow->setReadOnly(false);
                     m_health = {};
                     setState(RouterState::Stopped);
                 } else if (shouldAutoStartRouter(m_process.ownership(),
@@ -130,8 +132,10 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
                 m_config = config;
                 if (m_process.ownership() == ProcessOwnership::None) {
                     m_process.attachExternal(health);
+                    if (m_mainWindow) m_mainWindow->setReadOnly(true);
                 } else if (m_process.ownership() == ProcessOwnership::External) {
                     m_process.updateHealth(health);
+                    if (m_mainWindow) m_mainWindow->setReadOnly(true);
                 } else if (!healthMatchesOwnedProcess(
                                m_process.ownership(), m_process.processId(), health)) {
                     setState(RouterState::Conflict);
@@ -178,6 +182,7 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
 }
 
 QMenu *TrayApplication::menu() { return &m_menu; }
+MainWindow *TrayApplication::mainWindow() const { return m_mainWindow; }
 
 void TrayApplication::rebuildMenu()
 {
@@ -214,6 +219,9 @@ void TrayApplication::rebuildMenu()
     if (policy.stop) connect(m_menu.addAction(m_strings.stop), &QAction::triggered,
                              this, &TrayApplication::stopOwned);
     m_menu.addSeparator();
+    QAction *configuration = m_menu.addAction("Providers and Models");
+    configuration->setObjectName("openMainWindow");
+    connect(configuration, &QAction::triggered, this, &TrayApplication::openMainWindow);
     connect(m_menu.addAction(m_strings.openConfig), &QAction::triggered, this,
             [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(m_configPath)); });
     QAction *logs = m_menu.addAction(m_strings.openLogs);
@@ -228,6 +236,22 @@ void TrayApplication::rebuildMenu()
     m_menu.addSeparator();
     connect(m_menu.addAction(m_strings.quit), &QAction::triggered,
             qApp, &QCoreApplication::quit);
+}
+
+void TrayApplication::openMainWindow()
+{
+    if (!m_mainWindow) {
+        auto *client = new ConfigClient(Platform::coreExecutablePath(), m_configPath, this);
+        m_mainWindow = new MainWindow(client,
+            m_process.ownership() == ProcessOwnership::External);
+        m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
+        connect(m_mainWindow, &QObject::destroyed, this, [this] { m_mainWindow = nullptr; });
+    } else {
+        m_mainWindow->setReadOnly(m_process.ownership() == ProcessOwnership::External);
+    }
+    m_mainWindow->show();
+    m_mainWindow->raise();
+    m_mainWindow->activateWindow();
 }
 
 void TrayApplication::discover() { m_discovery.discover(); }

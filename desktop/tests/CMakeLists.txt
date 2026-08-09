@@ -1,6 +1,20 @@
 add_executable(test_core_fixture test_core_fixture.cpp)
 target_link_libraries(test_core_fixture PRIVATE Qt6::Core)
 
+find_program(ONELLM_GO_EXECUTABLE go)
+if(NOT ONELLM_GO_EXECUTABLE)
+    message(FATAL_ERROR "Go is required to build the test Core")
+endif()
+set(ONELLM_TEST_CORE
+    "${CMAKE_CURRENT_BINARY_DIR}/onellm-router-test-core${CMAKE_EXECUTABLE_SUFFIX}")
+add_custom_target(onellm_test_core ALL
+    COMMAND "${ONELLM_GO_EXECUTABLE}" build -o "${ONELLM_TEST_CORE}"
+            ./cmd/onellm-router
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/.."
+    BYPRODUCTS "${ONELLM_TEST_CORE}"
+    COMMENT "Building test Core"
+)
+
 add_executable(router_types_test router_types_test.cpp)
 target_include_directories(router_types_test PRIVATE ../src)
 target_link_libraries(router_types_test PRIVATE Qt6::Test)
@@ -63,6 +77,10 @@ set_tests_properties(proxy_probe_test PROPERTIES
 
 add_executable(tray_application_test
     tray_application_test.cpp
+    ../src/main_window.cpp
+    ../src/main_window.h
+    ../src/config/config_client.cpp
+    ../src/config/config_client.h
     ../src/proxy_probe.cpp
     ../src/router_discovery.cpp
     ../src/router_process.cpp
@@ -97,6 +115,36 @@ add_executable(platform_test
     platform_test.cpp
     ../src/platform/platform.h
     ../${ONELLM_PLATFORM_SOURCE}
+)
+
+add_executable(config_client_test
+    config_client_test.cpp
+    ../src/config/config_client.cpp
+    ../src/config/config_client.h
+)
+target_include_directories(config_client_test PRIVATE ../src)
+target_link_libraries(config_client_test PRIVATE Qt6::Test Qt6::Network)
+add_dependencies(config_client_test onellm_test_core)
+add_test(NAME config_client_test COMMAND config_client_test)
+set_tests_properties(config_client_test PROPERTIES
+    ENVIRONMENT "ONELLM_TEST_CORE=${ONELLM_TEST_CORE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_executable(main_window_test
+    main_window_test.cpp
+    ../src/main_window.cpp
+    ../src/main_window.h
+    ../src/config/config_client.cpp
+    ../src/config/config_client.h
+)
+target_include_directories(main_window_test PRIVATE ../src)
+target_link_libraries(main_window_test PRIVATE Qt6::Test Qt6::Widgets Qt6::Network)
+add_dependencies(main_window_test onellm_test_core)
+add_test(NAME main_window_test COMMAND main_window_test)
+set_tests_properties(main_window_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;ONELLM_TEST_CORE=${ONELLM_TEST_CORE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 target_include_directories(platform_test PRIVATE ../src)
 target_link_libraries(platform_test PRIVATE Qt6::Test)

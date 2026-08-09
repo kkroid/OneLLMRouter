@@ -21,6 +21,10 @@ endif()
 
 add_executable(onellm-router-tray WIN32
     src/main.cpp
+    src/main_window.cpp
+    src/main_window.h
+    src/config/config_client.cpp
+    src/config/config_client.h
     src/proxy_probe.cpp
     src/proxy_probe.h
     src/router_discovery.cpp
