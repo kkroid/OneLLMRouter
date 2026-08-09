@@ -7,12 +7,6 @@ import (
 	"testing"
 )
 
-func TestPlatformExecutableNameUnix(t *testing.T) {
-	if got := platformExecutableName("onellm-router"); got != "onellm-router" {
-		t.Fatalf("executable name = %q, want %q", got, "onellm-router")
-	}
-}
-
 func TestUnixLifecycleCommandsAreUnsupported(t *testing.T) {
 	for _, command := range []string{"install", "uninstall"} {
 		root := newRootCmd()

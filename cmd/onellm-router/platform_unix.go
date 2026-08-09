@@ -4,10 +4,6 @@ package main
 
 import "github.com/spf13/cobra"
 
-func platformExecutableName(name string) string {
-	return name
-}
-
 func validatePlatformLifecycle(daemon, trayChild bool) error {
 	if daemon && !trayChild {
 		return unsupportedPlatformOperation("--daemon")

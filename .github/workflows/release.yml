@@ -167,7 +167,7 @@ jobs:
 
   publish-release:
     if: github.ref_type == 'tag'
-    needs: windows-release
+    needs: [windows-release, go-platforms]
     runs-on: ubuntu-latest
     permissions:
       contents: write

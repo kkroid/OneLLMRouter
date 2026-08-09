@@ -21,10 +21,6 @@ import (
 
 var errInstallValueNotExist = registry.ErrNotExist
 
-func platformExecutableName(name string) string {
-	return name + ".exe"
-}
-
 func validatePlatformLifecycle(daemon, trayChild bool) error {
 	return nil
 }
