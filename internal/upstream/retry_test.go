@@ -592,7 +592,7 @@ func TestAttemptTimeoutUsesRemainingRetryBudget(t *testing.T) {
 	}
 }
 
-func TestFailedResponseBodyIsLimitedAndClosed(t *testing.T) {
+func TestFailedResponseBodyIsRetainedAndClosed(t *testing.T) {
 	reader := &countingReader{data: []byte(strings.Repeat("x", 10_000))}
 	body := &trackingBody{Reader: reader}
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -609,8 +609,33 @@ func TestFailedResponseBodyIsLimitedAndClosed(t *testing.T) {
 	if failure == nil || failure.StatusCode != http.StatusBadGateway {
 		t.Fatalf("failure = %+v", failure)
 	}
-	if reader.bytesRead != 4097 || body.closeCalls.Load() != 1 {
-		t.Fatalf("bytes read = %d, closes = %d; want 4097 and 1", reader.bytesRead, body.closeCalls.Load())
+	if reader.bytesRead != 10_000 || body.closeCalls.Load() != 1 {
+		t.Fatalf("bytes read = %d, closes = %d; want 10000 and 1", reader.bytesRead, body.closeCalls.Load())
+	}
+	if !failure.UpstreamResponseComplete || len(failure.UpstreamResponseBody) != 10_000 {
+		t.Fatalf("failure did not retain complete upstream response: %+v", failure)
+	}
+}
+
+func TestFailedResponseBodyRetentionIsLimited(t *testing.T) {
+	reader := &countingReader{data: []byte(strings.Repeat("x", maxUpstreamErrorBodyBytes+100))}
+	body := &trackingBody{Reader: reader}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		response := testResponse(http.StatusBadGateway)
+		response.Body = body
+		return response, nil
+	})}
+	policy := retryPolicy()
+	policy.MaxAttempts = 1
+	executor, _ := newTestExecutor(policy)
+
+	_, failure := executor.Do(context.Background(), client, Metadata{}, Options{Mode: Headers}, testRequestFactory())
+
+	if failure == nil || failure.UpstreamResponseComplete || failure.UpstreamResponseBody != nil {
+		t.Fatalf("failure = %+v", failure)
+	}
+	if reader.bytesRead != maxUpstreamErrorBodyBytes+1 || body.closeCalls.Load() != 1 {
+		t.Fatalf("bytes read = %d, closes = %d", reader.bytesRead, body.closeCalls.Load())
 	}
 }
 
@@ -988,6 +1013,45 @@ func TestRetryLogsCancellationDuringAttemptWithoutRetryFailure(t *testing.T) {
 				t.Fatalf("records = %#v", records)
 			}
 		})
+	}
+}
+
+func TestRetryLogsUpstreamCode(t *testing.T) {
+	policy := retryPolicy()
+	policy.MaxAttempts = 1
+	executor, _ := newTestExecutor(policy)
+	var output bytes.Buffer
+	executor.logger = slog.New(slog.NewJSONHandler(&output, nil))
+
+	_, failure := executor.Do(
+		context.Background(),
+		&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return testResponse(http.StatusOK), nil
+		})},
+		Metadata{RequestID: "req-capacity", Provider: "c78", Model: "gpt-5.6-sol", Endpoint: "responses"},
+		Options{
+			Mode: Headers,
+			Probe: func(context.Context, *http.Response) *Failure {
+				return &Failure{
+					StatusCode:   http.StatusServiceUnavailable,
+					Kind:         FailureHTTP,
+					UpstreamCode: "server_is_overloaded",
+					Summary:      "model is at capacity",
+				}
+			},
+		},
+		testRequestFactory(),
+	)
+	if failure == nil || failure.UpstreamCode != "server_is_overloaded" {
+		t.Fatalf("failure = %+v", failure)
+	}
+
+	records := decodeJSONLogRecords(t, output.Bytes())
+	if len(records) != 2 || records[0]["msg"] != "upstream attempt failed" || records[1]["msg"] != "upstream retry exhausted" {
+		t.Fatalf("records = %#v", records)
+	}
+	if records[0]["upstream_code"] != failure.UpstreamCode || records[1]["upstream_code"] != failure.UpstreamCode {
+		t.Fatalf("records = %#v", records)
 	}
 }
 

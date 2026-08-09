@@ -106,6 +106,31 @@ func TestWriteOpenAIUpstreamErrorUsesSkippedCodeForIneligibleFailure(t *testing.
 	}
 }
 
+func TestWriteOpenAIUpstreamErrorDoesNotExposeInternalUpstreamCode(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	failure := &upstream.Failure{
+		StatusCode:    http.StatusServiceUnavailable,
+		Kind:          upstream.FailureHTTP,
+		UpstreamCode:  "server_is_overloaded",
+		Attempts:      15,
+		RetryEligible: true,
+	}
+
+	writeOpenAIUpstreamError(recorder, "c78", failure)
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Code != "upstream_retry_exhausted" {
+		t.Fatalf("error code = %q, want upstream_retry_exhausted", payload.Error.Code)
+	}
+}
+
 func TestUpstreamErrorWriterUsesTimeoutStatus(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	failure := &upstream.Failure{

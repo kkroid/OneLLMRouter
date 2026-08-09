@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -300,7 +301,7 @@ func TestOpenAITranslateRetriesWithRebuiltRequest(t *testing.T) {
 	}
 }
 
-func TestOpenAIChatPersistentFailuresUseProtocolError(t *testing.T) {
+func TestOpenAIChatDirectPassesThroughUpstreamHTTPError(t *testing.T) {
 	for _, test := range []struct {
 		name          string
 		openAIBaseURL bool
@@ -310,11 +311,19 @@ func TestOpenAIChatPersistentFailuresUseProtocolError(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			const secret = "provider-secret"
+			upstreamBody := `{"error":{"message":"This response_format type is unavailable now","type":"invalid_request_error","param":null,"code":"invalid_request_error"}}`
+			if !test.openAIBaseURL {
+				upstreamBody = `{"x-api-key":"provider-secret","message":"denied"}`
+			}
 			var calls int
 			mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Upstream-Request-Id", "upstream-request")
+				w.Header().Set("Connection", "X-Hop-By-Hop")
+				w.Header().Set("X-Hop-By-Hop", "must-not-pass")
 				w.WriteHeader(http.StatusForbidden)
-				io.WriteString(w, `{"x-api-key":"provider-secret","message":"denied"}`)
+				_, _ = io.WriteString(w, upstreamBody)
 			}))
 			defer mockAPI.Close()
 
@@ -331,6 +340,18 @@ func TestOpenAIChatPersistentFailuresUseProtocolError(t *testing.T) {
 
 			if recorder.Code != http.StatusForbidden || calls != 1 {
 				t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+			}
+			if test.openAIBaseURL {
+				if recorder.Body.String() != upstreamBody {
+					t.Fatalf("body = %q, want exact upstream body %q", recorder.Body.String(), upstreamBody)
+				}
+				if recorder.Header().Get("Content-Type") != "application/json" || recorder.Header().Get("X-Upstream-Request-Id") != "upstream-request" {
+					t.Fatalf("response headers = %v", recorder.Header())
+				}
+				if recorder.Header().Get("Connection") != "" || recorder.Header().Get("X-Hop-By-Hop") != "" {
+					t.Fatalf("hop-by-hop headers leaked: %v", recorder.Header())
+				}
+				return
 			}
 			var payload struct {
 				Error struct {
@@ -350,6 +371,34 @@ func TestOpenAIChatPersistentFailuresUseProtocolError(t *testing.T) {
 				t.Fatalf("unsafe or incomplete error: %s", recorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestOpenAIChatDirectPassesThroughFinalRetryError(t *testing.T) {
+	var calls int
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Attempt", fmt.Sprint(calls))
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = fmt.Fprintf(w, `{"error":{"message":"attempt %d"}}`, calls)
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", OpenAIBaseURL: mockAPI.URL, Models: []string{"m1"},
+	}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"ds/m1","messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeOpenAI(recorder, request)
+
+	if recorder.Code != http.StatusBadGateway || calls != 2 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+	if recorder.Body.String() != `{"error":{"message":"attempt 2"}}` || recorder.Header().Get("X-Attempt") != "2" {
+		t.Fatalf("headers = %v, body = %s", recorder.Header(), recorder.Body.String())
 	}
 }
 

@@ -27,6 +27,12 @@ const (
 
 type RequestFactory func(context.Context) (*http.Request, error)
 
+// ResponseProbe may inspect a successful response before Headers mode commits
+// it to the client. The probe owns any bytes it reads and must restore
+// response.Body before returning nil. A non-nil Failure causes the executor to
+// close the response body and apply the normal retry policy.
+type ResponseProbe func(context.Context, *http.Response) *Failure
+
 type Metadata struct {
 	RequestID string
 	Provider  string
@@ -39,6 +45,7 @@ type Options struct {
 	PerAttemptTimeout time.Duration
 	SuccessBodyLimit  int64
 	Sanitizer         *Sanitizer
+	Probe             ResponseProbe
 }
 
 type Result struct {
@@ -63,13 +70,18 @@ const (
 )
 
 type Failure struct {
-	StatusCode    int
-	Kind          FailureKind
-	Summary       string
-	Err           error
-	Attempts      int
-	Elapsed       time.Duration
-	RetryEligible bool
+	StatusCode               int
+	Kind                     FailureKind
+	UpstreamCode             string
+	UpstreamResponseStatus   int
+	UpstreamResponseBody     []byte
+	UpstreamResponseHeader   http.Header
+	UpstreamResponseComplete bool
+	Summary                  string
+	Err                      error
+	Attempts                 int
+	Elapsed                  time.Duration
+	RetryEligible            bool
 }
 
 type Executor struct {
@@ -84,6 +96,8 @@ var (
 	errAttemptTimeout  = errors.New("upstream attempt timeout")
 	ErrServiceShutdown = errors.New("OneLLMRouter service shutdown")
 )
+
+const maxUpstreamErrorBodyBytes = 1 << 20
 
 func NewExecutor(policy config.RetryConfig, loggers ...*slog.Logger) *Executor {
 	executor := &Executor{
@@ -167,8 +181,26 @@ func (e *Executor) Do(
 				lastFailure = failure
 				response = nil
 			} else {
+				var probeFailure *Failure
+				if options.Probe != nil {
+					probeFailure = options.Probe(attemptContext, response)
+				}
 				stopTimeout()
-				if cause := context.Cause(attemptContext); cause != nil {
+				if probeFailure != nil {
+					if response.Body != nil {
+						_ = response.Body.Close()
+					}
+					probeFailure = e.normalizeProbeFailure(started, attempt, attemptContext, probeFailure)
+					release()
+					if probeFailure.Kind == FailureProtocol {
+						e.logAttemptFailure(metadata, maxAttempts, probeFailure, 0, options.Sanitizer)
+						return e.completeFailure(ctx, metadata, maxAttempts, options.Sanitizer, probeFailure)
+					}
+					if isCancellationFailure(probeFailure) {
+						return e.completeFailure(ctx, metadata, maxAttempts, options.Sanitizer, probeFailure)
+					}
+					lastFailure = probeFailure
+				} else if cause := context.Cause(attemptContext); cause != nil {
 					if response.Body != nil {
 						_ = response.Body.Close()
 					}
@@ -192,11 +224,17 @@ func (e *Executor) Do(
 			}
 		} else {
 			var failureBody []byte
+			failureBodyComplete := false
 			if response != nil && response.Body != nil {
-				failureBody, _ = io.ReadAll(io.LimitReader(response.Body, 4097))
+				var readErr error
+				failureBody, readErr = io.ReadAll(io.LimitReader(response.Body, maxUpstreamErrorBodyBytes+1))
 				_ = response.Body.Close()
+				failureBodyComplete = readErr == nil && len(failureBody) <= maxUpstreamErrorBodyBytes
+				if len(failureBody) > maxUpstreamErrorBodyBytes {
+					failureBody = failureBody[:maxUpstreamErrorBodyBytes]
+				}
 			}
-			lastFailure = e.attemptFailure(started, attempt, attemptContext, response, requestErr, failureBody, options.Sanitizer)
+			lastFailure = e.attemptFailure(started, attempt, attemptContext, response, requestErr, failureBody, failureBodyComplete, options.Sanitizer)
 			release()
 			if isCancellationFailure(lastFailure) {
 				return e.completeFailure(ctx, metadata, maxAttempts, options.Sanitizer, lastFailure)
@@ -277,6 +315,9 @@ func (e *Executor) completeFailure(
 	if failure.StatusCode != 0 {
 		attrs = append(attrs, "status", failure.StatusCode)
 	}
+	if failure.UpstreamCode != "" {
+		attrs = append(attrs, "upstream_code", failure.UpstreamCode)
+	}
 	if failure.Kind == FailureClientCancel || failure.Kind == FailureServiceShutdown {
 		e.logger.Info("upstream retry canceled", attrs...)
 	} else if failure.RetryEligible {
@@ -324,6 +365,9 @@ func (e *Executor) logAttemptFailure(metadata Metadata, maxAttempts int, failure
 	if failure.StatusCode != 0 {
 		attrs = append(attrs, "status", failure.StatusCode)
 	}
+	if failure.UpstreamCode != "" {
+		attrs = append(attrs, "upstream_code", failure.UpstreamCode)
+	}
 	e.logger.Warn("upstream attempt failed", attrs...)
 }
 
@@ -363,6 +407,7 @@ func (e *Executor) attemptFailure(
 	response *http.Response,
 	err error,
 	body []byte,
+	bodyComplete bool,
 	sanitizer *Sanitizer,
 ) *Failure {
 	if cause := context.Cause(attemptContext); cause != nil {
@@ -378,6 +423,12 @@ func (e *Executor) attemptFailure(
 		failure.StatusCode = response.StatusCode
 		failure.Summary = sanitizeWith(sanitizer, body)
 		failure.Err = fmt.Errorf("upstream returned HTTP %d", response.StatusCode)
+		if bodyComplete {
+			failure.UpstreamResponseStatus = response.StatusCode
+			failure.UpstreamResponseBody = append([]byte{}, body...)
+			failure.UpstreamResponseHeader = response.Header.Clone()
+			failure.UpstreamResponseComplete = true
+		}
 		return failure
 	}
 	if err != nil {
@@ -395,6 +446,34 @@ func (e *Executor) attemptFailure(
 		return failure
 	}
 	panic("attempt failure has neither response nor error")
+}
+
+func (e *Executor) normalizeProbeFailure(
+	started time.Time,
+	attempt int,
+	attemptContext context.Context,
+	failure *Failure,
+) *Failure {
+	if cause := context.Cause(attemptContext); cause != nil {
+		return e.contextFailure(started, attempt, cause)
+	}
+	if failure.Kind == "" {
+		failure.Kind = FailureProtocol
+	}
+	if failure.Kind == FailureBodyRead && isTimeoutError(failure.Err) {
+		failure.Kind = FailureTimeout
+		failure.StatusCode = http.StatusGatewayTimeout
+	}
+	failure.Attempts = attempt
+	failure.Elapsed = e.elapsed(started)
+	if failure.Err == nil {
+		if failure.Summary != "" {
+			failure.Err = errors.New(failure.Summary)
+		} else {
+			failure.Err = errors.New(string(failure.Kind))
+		}
+	}
+	return failure
 }
 
 func (e *Executor) readBuffered(

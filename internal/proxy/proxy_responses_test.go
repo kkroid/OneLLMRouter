@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/kkroid/onellm-router/internal/config"
 	onellmLog "github.com/kkroid/onellm-router/internal/log"
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/upstream"
@@ -476,16 +478,248 @@ func TestResponsesStreamRetriesOnlyBeforeSuccessfulHeaders(t *testing.T) {
 	}
 }
 
-func TestResponsesPersistentFailureUsesOpenAIError(t *testing.T) {
-	const secret = "provider-secret"
+func TestResponsesStreamRetriesCapacityFailureBeforeCommit(t *testing.T) {
+	var calls int
+	padding := strings.Repeat("x", 48<<10)
+	capacityStream :=
+		"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"padding\":\"" + padding + "\"}}\n\n" +
+			"event: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"response\":{\"padding\":\"" + padding + "\"}}\n\n" +
+			"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Selected model is at capacity. Please try a different model.\"}}}\n\n"
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(capacityStream)),
+				Request:    request,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"event: response.created\ndata: {\"type\":\"response.created\"}\n\n" +
+					"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\n" +
+					"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+			)),
+			Request: request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "c78", ResponsesBaseURL: "http://unused", APIKey: "secret", Models: []string{"gpt-5"},
+	}})
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	meta := &onellmLog.RequestMeta{}
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"c78/gpt-5","input":"hi","stream":true}`))
+	request = request.WithContext(onellmLog.WithRequestMeta(request.Context(), meta))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 2 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"delta":"recovered"`) || strings.Contains(recorder.Body.String(), "server_is_overloaded") {
+		t.Fatalf("unexpected streamed body: %s", recorder.Body.String())
+	}
+	if meta.UpstreamAttempts != 2 || meta.LastUpstreamStatus != http.StatusServiceUnavailable || meta.LastFailureKind != string(upstream.FailureHTTP) {
+		t.Fatalf("retry metadata = %+v", meta)
+	}
+}
+
+func TestResponsesStreamDoesNotRetryAfterCommitEvent(t *testing.T) {
+	commitEvents := map[string]string{
+		"output":    "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+		"reasoning": "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"partial\"}\n\n",
+		"tool":      "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\"}}\n\n",
+		"unknown":   "event: response.new_future_event\ndata: {\"type\":\"response.new_future_event\",\"value\":\"keep\"}\n\n",
+	}
+	capacityEvent := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"model is at capacity\"}}}\n\n"
+
+	for name, commitEvent := range commitEvents {
+		t.Run(name, func(t *testing.T) {
+			var calls int
+			stream := commitEvent + capacityEvent
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader(stream)),
+					Request:    request,
+				}, nil
+			})}
+			resolver := router.NewResolver([]router.Provider{{
+				Prefix: "c78", ResponsesBaseURL: "http://unused", APIKey: "secret", Models: []string{"gpt-5"},
+			}})
+			handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(3))
+			request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"c78/gpt-5","input":"hi","stream":true}`))
+			recorder := httptest.NewRecorder()
+
+			handler.ServeResponses(recorder, request)
+
+			if recorder.Code != http.StatusOK || calls != 1 || recorder.Body.String() != stream {
+				t.Fatalf("status = %d, calls = %d, body = %q", recorder.Code, calls, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesStreamHeartbeatsDoNotConsumeProbeEventBudget(t *testing.T) {
+	var calls int
+	heartbeats := strings.Repeat(": keep-alive\n\n", responsesProbeMaxLifecycleEvents+1)
+	capacityStream := heartbeats +
+		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"model is at capacity\"}}}\n\n"
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		stream := capacityStream
+		if calls > 1 {
+			stream = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(stream)),
+			Request:    request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "c78", ResponsesBaseURL: "http://unused", APIKey: "secret", Models: []string{"gpt-5"},
+	}})
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"c78/gpt-5","input":"hi","stream":true}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 2 || strings.Contains(recorder.Body.String(), "server_is_overloaded") {
+		t.Fatalf("status = %d, calls = %d, body = %q", recorder.Code, calls, recorder.Body.String())
+	}
+}
+
+func TestResponsesStreamCapacityReturnsOriginalSSEWhenRetryIsNotConfigured(t *testing.T) {
+	const capacityStream = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"service_unavailable_error\",\"code\":\"slow_down\",\"message\":\"try again later, api_key=secret\"}}\n\n"
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(capacityStream)),
+			Request:    request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "c78", ResponsesBaseURL: "http://unused", APIKey: "secret", Models: []string{"gpt-5"},
+	}})
+	policy := config.DefaultConfig().Retry
+	policy.MaxAttempts = 3
+	policy.StatusCodes = []int{http.StatusBadGateway}
+	policyExecutor := upstream.NewExecutor(policy)
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), policyExecutor)
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"c78/gpt-5","input":"hi","stream":true}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 1 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+	if recorder.Body.String() != capacityStream || recorder.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("headers = %v, body = %q", recorder.Header(), recorder.Body.String())
+	}
+}
+
+func TestResponsesStreamCapacityExhaustionReturnsLastOriginalSSE(t *testing.T) {
+	streams := []string{
+		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"attempt one at capacity\"}}}\n\n",
+		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"attempt two at capacity\"}}}\n\n",
+	}
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		index := calls
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
+				"X-Attempt":    []string{strconv.Itoa(calls)},
+			},
+			Body:    io.NopCloser(strings.NewReader(streams[index])),
+			Request: request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "c78", ResponsesBaseURL: "http://unused", Models: []string{"gpt-5"},
+	}})
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	meta := &onellmLog.RequestMeta{}
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"c78/gpt-5","input":"hi","stream":true}`))
+	request = request.WithContext(onellmLog.WithRequestMeta(request.Context(), meta))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK || calls != 2 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
+	}
+	if recorder.Body.String() != streams[1] || recorder.Header().Get("Content-Type") != "text/event-stream" || recorder.Header().Get("X-Attempt") != "2" {
+		t.Fatalf("headers = %v, body = %q", recorder.Header(), recorder.Body.String())
+	}
+	if meta.UpstreamAttempts != 2 || meta.LastUpstreamStatus != http.StatusServiceUnavailable {
+		t.Fatalf("retry metadata = %+v", meta)
+	}
+}
+
+func TestResponsesStreamProbeFailOpenPreservesUnknownEvent(t *testing.T) {
+	stream := "event: response.new_future_event\ndata: {\"type\":\"response.new_future_event\",\"value\":\"keep\"}\n\n"
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(stream)),
+			Request:    request,
+		}, nil
+	})}
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "c78", ResponsesBaseURL: "http://unused", APIKey: "secret", Models: []string{"gpt-5"},
+	}})
+	handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"c78/gpt-5","input":"hi","stream":true}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != stream {
+		t.Fatalf("status = %d, body = %q", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestClassifyResponsesSSEFrameSupportsCRLFAndMultilineData(t *testing.T) {
+	frame := "event: response.failed\r\n" +
+		"data: {\"type\":\"response.failed\",\r\n" +
+		"data: \"response\":{\"error\":{\"code\":\"slow_down\",\"message\":\"try later\"}}}\r\n\r\n"
+
+	decision, summary := classifyResponsesSSEFrame([]byte(frame))
+
+	if decision != responsesProbeCapacity || summary != "try later" {
+		t.Fatalf("decision = %d, summary = %q", decision, summary)
+	}
+}
+
+func TestResponsesPersistentFailurePassesThroughUpstreamError(t *testing.T) {
+	const upstreamBody = `{"error":{"message":"unsupported parameter","type":"invalid_request_error","code":"invalid_request_error"}}`
 	var calls int
 	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Upstream-Request-Id", "responses-request")
 		w.WriteHeader(http.StatusForbidden)
-		io.WriteString(w, `{"authorization":"Bearer provider-secret","message":"denied"}`)
+		_, _ = io.WriteString(w, upstreamBody)
 	}))
 	defer mockAPI.Close()
-	resolver := router.NewResolver([]router.Provider{{Prefix: "oai", ResponsesBaseURL: mockAPI.URL, APIKey: secret, Models: []string{"gpt-5"}}})
+	resolver := router.NewResolver([]router.Provider{{Prefix: "oai", ResponsesBaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"gpt-5"}}})
 	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
 	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"oai/gpt-5","input":"hi"}`))
 	recorder := httptest.NewRecorder()
@@ -495,22 +729,8 @@ func TestResponsesPersistentFailureUsesOpenAIError(t *testing.T) {
 	if recorder.Code != http.StatusForbidden || calls != 1 {
 		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
 	}
-	var payload struct {
-		Error struct {
-			Message string  `json:"message"`
-			Type    string  `json:"type"`
-			Param   *string `json:"param"`
-			Code    string  `json:"code"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.Error.Type != "upstream_error" || payload.Error.Param != nil || payload.Error.Code != "upstream_retry_skipped" {
-		t.Fatalf("payload = %+v", payload)
-	}
-	if strings.Contains(recorder.Body.String(), secret) || !strings.Contains(payload.Error.Message, "Attempts: 1") {
-		t.Fatalf("unsafe or incomplete error: %s", recorder.Body.String())
+	if recorder.Body.String() != upstreamBody || recorder.Header().Get("Content-Type") != "application/json" || recorder.Header().Get("X-Upstream-Request-Id") != "responses-request" {
+		t.Fatalf("headers = %v, body = %s", recorder.Header(), recorder.Body.String())
 	}
 }
 

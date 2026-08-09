@@ -2,6 +2,13 @@
 
 这里记录 OneLLMRouter 面向使用者的重要变更。
 
+## [未发布]
+
+### 修复
+
+- OpenAI Responses 流在输出开始前遇到模型容量错误时，现在会按配置的上游重试策略处理；重试未恢复时返回最后一次原始 SSE 失败，并且绝不重放已经开始的输出。
+- Anthropic、OpenAI Chat Completions 和 OpenAI Responses 原生直通路由现在会原样返回最后一次上游 HTTP 错误的状态码、响应体和端到端响应头，不再包装为 OneLLMRouter 错误；传输失败和协议翻译仍使用路由器生成的错误。
+
 ## [1.4.1] - 2026-08-06
 
 ### 修复

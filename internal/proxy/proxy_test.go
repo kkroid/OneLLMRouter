@@ -291,15 +291,17 @@ func TestAnthropicRetriesConfiguredStatuses(t *testing.T) {
 	}
 }
 
-func TestAnthropicFinalFailureUsesSafeProtocolError(t *testing.T) {
-	const secret = "provider-secret"
+func TestAnthropicFinalFailurePassesThroughUpstreamError(t *testing.T) {
+	const upstreamBody = `{"type":"error","error":{"type":"permission_error","message":"denied"}}`
 	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Request-Id", "anthropic-request")
 		w.WriteHeader(http.StatusForbidden)
-		io.WriteString(w, `{"x-api-key":"provider-secret","message":"denied"}`)
+		_, _ = io.WriteString(w, upstreamBody)
 	}))
 	defer mockAPI.Close()
 	resolver := router.NewResolver([]router.Provider{{
-		Prefix: "ds", BaseURL: mockAPI.URL, APIKey: secret, Models: []string{"m1"},
+		Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"},
 	}})
 	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
 	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","max_tokens":5,"messages":[]}`))
@@ -307,11 +309,11 @@ func TestAnthropicFinalFailureUsesSafeProtocolError(t *testing.T) {
 
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), "upstream request failed") {
+	if recorder.Code != http.StatusForbidden || recorder.Body.String() != upstreamBody {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	if strings.Contains(recorder.Body.String(), secret) || recorder.Header().Get("Content-Type") != "application/json" {
-		t.Fatalf("unsafe final response: headers=%v body=%s", recorder.Header(), recorder.Body.String())
+	if recorder.Header().Get("Content-Type") != "application/json" || recorder.Header().Get("Request-Id") != "anthropic-request" {
+		t.Fatalf("headers=%v body=%s", recorder.Header(), recorder.Body.String())
 	}
 }
 

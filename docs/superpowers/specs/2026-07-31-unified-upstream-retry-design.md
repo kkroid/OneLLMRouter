@@ -146,16 +146,18 @@ retry:
 - 建立上游连接失败。
 - 等待上游响应头失败。
 - 上游返回 `retry.status_codes` 中配置的非 `2xx` 状态。
+- Responses 流在尚未产生有效输出前发送可识别的容量失败事件；此事件在内部映射为
+  `503 Service Unavailable`，是否重试仍严格由 `retry.status_codes` 决定。该映射不改变最终对客户端返回的原始上游响应。
 
 此时 OneLLMRouter 尚未向客户端提交成功响应，可以关闭本次上游响应体、等待退避时间并重新建立请求。
 
 ### 7.2 不可以重试的流式错误
 
-一旦 OneLLMRouter 接受上游 `2xx` 响应头，本次流式响应即视为已开始，不再等待第一个 SSE 事件，也不以是否已经写出下游字节作为重试条件。之后出现连接中断、首事件超时、空闲超时、畸形事件或缺少结束事件时，不得自动重新调用模型。
+Responses 流有一个很窄的例外：接受上游 `2xx` 响应头后，OneLLMRouter 会在尚未提交下游响应前检查受限的首段 SSE。若在任何有效输出前发现明确的容量失败事件，仍可将本次尝试交给统一重试器。一旦出现有效输出，或事件格式/类型无法安全判断，响应即视为已开始；之后出现连接中断、首事件超时、空闲超时、畸形事件或缺少结束事件时，不得自动重新调用模型。
 
 原因是客户端已收到的内容无法撤回，而重新调用模型可能产生不同文本或重复工具调用。此类错误继续使用现有断流处理和日志行为。
 
-为了保持改动小，本需求不要求为了捕获首个 SSE 事件而缓存或重组上游流。流式请求收到成功响应头后即可沿用现有透传路径。
+预检只缓存最多 256 KiB、16 个生命周期事件，并使用可回放 body 保持原始 SSE 字节和顺序。SSE comment/heartbeat 不消耗事件数量预算，但仍受字节和请求超时约束。缓存达到上限、遇到未知事件或无法解析的事件时 fail-open，立即回到原有透传路径；预检失败不会把已产生的输出交给另一次模型调用。容量重试未恢复时，最后一次缓存的原始 `200 + SSE` 失败响应会返回客户端。256 KiB 可容纳现场中容量错误前两条各约 47 KiB 的生命周期事件，同时保持并发请求的内存占用有界。
 
 ## 8. 请求重建与资源处理
 
@@ -271,14 +273,14 @@ Chat Completions 和 Responses 最终错误必须使用：
 }
 ```
 
-`code` 与最终失败在当前配置下的重试资格一致：具备资格但达到次数或时间上限时为 `upstream_retry_exhausted`；未启用重试或 HTTP 状态不在 `status_codes` 中时为 `upstream_retry_skipped`。`max_attempts: 1` 不改变失败的重试资格。
+`code` 与最终失败在当前配置下的重试资格一致：具备资格但达到次数或时间上限时为 `upstream_retry_exhausted`；未启用重试或 HTTP 状态不在 `status_codes` 中时为 `upstream_retry_skipped`。`max_attempts: 1` 不改变失败的重试资格。这些代码只用于没有完整上游失败响应、或必须执行协议翻译的场景。原生协议直通链路会返回最后一次完整上游失败响应；Responses 容量预检使用内部 503 做重试判断，但最终仍返回原始 `200 + SSE`。
 
-最终错误统一使用 `application/json`，不透传任意上游错误 header 或 Content-Type。成功响应仍保持现有字节、语义、usage、tool call、finish reason、SSE 顺序以及 Responses 流当前透传的成功 header。
+路由器生成的最终错误使用 `application/json`。原生协议直通链路会透传最后一次完整上游失败响应的状态码、正文和端到端 header，并过滤 hop-by-hop header；成功响应仍保持现有字节、语义、usage、tool call、finish reason、SSE 顺序以及 Responses 流当前透传的成功 header。
 
 ### 10.3 原始错误正文处理
 
-- 默认最多保留最后一次上游错误正文的 4 KiB。
-- 超过上限时截断并明确标记。
+- 日志摘要最多保留最后一次上游错误正文的 4 KiB，并在截断时明确标记。
+- 为原生协议透传最多保留 1 MiB 完整错误正文；超过上限时不向客户端返回不完整的上游正文，改用路由器错误。
 - 无效 UTF-8 使用替换字符解码，移除不可显示的控制字符但保留正常空白。
 - 大小写不敏感地屏蔽 Bearer credential，以及 JSON/header 文本中的 `api_key`、`api-key`、`x-api-key` 和 `authorization` 值。
 - 完全相同的错误无需在最终响应中重复列出。
@@ -309,7 +311,7 @@ handler 必须先完成模型解析、模型 ID 改写和协议转换，再把�
 
 统一组件使用同一个重试循环，但提供两种明确模式：
 
-1. **Headers 模式**用于流式请求。非 `2xx` 时读取受限错误正文并关闭 body；状态存在于 `retry.status_codes` 时重试，否则立即返回。`2xx` 时立即返回保持打开的 response body，不缓存 SSE 数据，由 handler 延续现有透传或翻译。
+1. **Headers 模式**用于流式请求。非 `2xx` 时读取受限错误正文并关闭 body；状态存在于 `retry.status_codes` 时重试，否则立即返回。`2xx` 时通常返回保持打开的 response body，由 handler 延续现有透传或翻译。Responses 可选地在提交前运行协议预检；预检把明确的容量事件转换为内部 HTTP 失败并保存原始 SSE，其他情况恢复原始 body 后透传。重试未恢复时 handler 返回最后一次原始 SSE。
 2. **Buffered 模式**用于非流式请求。只有在该路径声明的成功 body 策略内完整读完 `2xx` body 才算成功；读取超时或 I/O 错误属于可重试失败。组件返回响应元数据和完整 body，handler 再执行现有解析、翻译或透传。
 
 Buffered 调用必须显式传入 `SuccessBodyLimit`：`0` 表示不限长，正数表示最多接受的成功正文长度。各路径固定为：
@@ -662,6 +664,8 @@ Anthropic Messages、Chat Completions 直连、Chat 到 Anthropic 翻译、Respo
 - [ ] 非流式迁移到 Buffered；流式迁移到 Headers，并仅在最终 2xx 后复制现有成功 header。
 - [ ] 证明 3xx 不自动跳转、配置列出的非 2xx 可重试、未列出的状态立即返回、非流式 body 读取错误可重试。
 - [ ] 保留当前 Responses 字节透传和流式 io.Copy 行为；接受 2xx 后的断流只记录错误，不重试。
+- [ ] 对 `response.failed`/`error` 中的 `server_is_overloaded`、`slow_down` 和容量消息，在有效输出前映射内部 503 并验证配置驱动的重试；跳过或耗尽时返回最后一次原始 `200 + SSE`。
+- [ ] 验证预检后的字节回放、输出/推理/工具事件后的不可重试边界、heartbeat 预算，以及未知/超限事件的 fail-open 行为。
 
 验证：
 

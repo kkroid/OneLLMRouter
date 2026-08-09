@@ -2,6 +2,13 @@
 
 All notable user-facing changes to OneLLMRouter are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- OpenAI Responses streams now retry pre-output model-capacity failures through the configured upstream retry policy, return the final original SSE failure when retries do not recover, and never replay output that has already started.
+- Native Anthropic, OpenAI Chat Completions, and OpenAI Responses routes now return the final upstream HTTP error status, body, and end-to-end headers without wrapping them in a OneLLMRouter error. Transport failures and protocol translation still use router-generated errors.
+
 ## [1.4.1] - 2026-08-06
 
 ### Fixed

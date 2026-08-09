@@ -164,6 +164,9 @@ func (h *Handler) externalHandler(w http.ResponseWriter, r *http.Request, body *
 			h.writeError(w, http.StatusInternalServerError, "create request: "+sanitizer.Sanitize([]byte(failure.Err.Error())))
 			return
 		}
+		if writeUpstreamFailureResponse(w, failure) {
+			return
+		}
 		writeAnthropicUpstreamError(w, resolved.Provider.Prefix, failure)
 		return
 	}
@@ -372,6 +375,9 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, ra
 			h.writeError(w, http.StatusInternalServerError, "create request: "+sanitizer.Sanitize([]byte(failure.Err.Error())))
 			return
 		}
+		if writeUpstreamFailureResponse(w, failure) {
+			return
+		}
 		writeOpenAIUpstreamError(w, resolved.Provider.Prefix, failure)
 		return
 	}
@@ -570,8 +576,12 @@ func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request,
 	sanitizer := upstream.NewSanitizer(resolved.Provider.APIKey)
 	meta := onellmLog.RequestMetaFromContext(r.Context())
 	mode := upstream.Buffered
+	var probe upstream.ResponseProbe
 	if stream {
 		mode = upstream.Headers
+		probe = func(ctx context.Context, response *http.Response) *upstream.Failure {
+			return probeResponsesSSE(ctx, response, sanitizer)
+		}
 	}
 	meta.UpstreamStage = "headers"
 	result, failure := h.upstreamExecutor().Do(
@@ -588,6 +598,7 @@ func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request,
 			PerAttemptTimeout: openAIRequestTimeout(),
 			SuccessBodyLimit:  0,
 			Sanitizer:         sanitizer,
+			Probe:             probe,
 		},
 		func(ctx context.Context) (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawBody))
@@ -615,6 +626,9 @@ func (h *Handler) responsesDirectHandler(w http.ResponseWriter, r *http.Request,
 		meta.EndReason = "upstream_error"
 		if failure.Kind == upstream.FailureLocal {
 			h.writeError(w, http.StatusInternalServerError, "create request: "+sanitizer.Sanitize([]byte(failure.Err.Error())))
+			return
+		}
+		if writeUpstreamFailureResponse(w, failure) {
 			return
 		}
 		writeOpenAIUpstreamError(w, resolved.Provider.Prefix, failure)

@@ -40,6 +40,50 @@ func writeOpenAIUpstreamError(w http.ResponseWriter, provider string, failure *u
 	writeUpstreamJSON(w, failureStatus(failure), payload)
 }
 
+func writeUpstreamFailureResponse(w http.ResponseWriter, failure *upstream.Failure) bool {
+	if failure == nil || failure.Kind != upstream.FailureHTTP || !failure.UpstreamResponseComplete {
+		return false
+	}
+	copyUpstreamResponseHeaders(w.Header(), failure.UpstreamResponseHeader)
+	status := failure.UpstreamResponseStatus
+	if status == 0 {
+		status = failure.StatusCode
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(failure.UpstreamResponseBody)
+	return true
+}
+
+func copyUpstreamResponseHeaders(destination, source http.Header) {
+	connectionHeaders := make(map[string]struct{})
+	for _, value := range source.Values("Connection") {
+		for token := range strings.SplitSeq(value, ",") {
+			connectionHeaders[http.CanonicalHeaderKey(strings.TrimSpace(token))] = struct{}{}
+		}
+	}
+	for key, values := range source {
+		canonicalKey := http.CanonicalHeaderKey(key)
+		if isHopByHopHeader(canonicalKey) || canonicalKey == "Content-Length" {
+			continue
+		}
+		if _, skip := connectionHeaders[canonicalKey]; skip {
+			continue
+		}
+		for _, value := range values {
+			destination.Add(canonicalKey, value)
+		}
+	}
+}
+
+func isHopByHopHeader(key string) bool {
+	switch key {
+	case "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
+		return true
+	default:
+		return false
+	}
+}
+
 func upstreamFailureMessage(provider string, failure *upstream.Failure) string {
 	lastError := ""
 	if failure.StatusCode != 0 && failure.Kind == upstream.FailureHTTP {
