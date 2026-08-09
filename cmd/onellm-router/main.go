@@ -78,6 +78,9 @@ Anthropic and OpenAI API endpoints.`,
 	rootCmd.AddCommand(serve)
 	rootCmd.AddCommand(statusCmd())
 	rootCmd.AddCommand(configInfoCmd())
+	rootCmd.AddCommand(configGetCmd())
+	rootCmd.AddCommand(configValidateCmd())
+	rootCmd.AddCommand(configApplyCmd())
 	rootCmd.AddCommand(statsCmd())
 	rootCmd.AddCommand(&cobra.Command{
 		Use: "version", Short: "Print version",

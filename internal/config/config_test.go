@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,6 +10,139 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSnapshotOmitsStoredAPIKeys(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers = []ProviderConfig{{Prefix: "alpha", APIKey: "old-" + "secret"}}
+
+	data, err := json.Marshal(NewSnapshot(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte(cfg.Providers[0].APIKey)) || bytes.Contains(data, []byte(`"api_key":`)) {
+		t.Fatalf("snapshot exposed API key: %s", data)
+	}
+	if !bytes.Contains(data, []byte(`"api_key_set":true`)) {
+		t.Fatalf("snapshot omitted api_key_set: %s", data)
+	}
+}
+
+func TestSnapshotResolvePreservesKeyByPrefix(t *testing.T) {
+	existing := DefaultConfig()
+	existing.Providers = []ProviderConfig{{Prefix: "alpha", BaseURL: "https://example.invalid", APIKey: "old-" + "secret"}}
+	snapshot := NewSnapshot(existing)
+
+	resolved, errors := snapshot.Resolve(existing)
+	if len(errors) != 0 {
+		t.Fatalf("Resolve() errors = %+v", errors)
+	}
+	if got := resolved.Providers[0].APIKey; got != existing.Providers[0].APIKey {
+		t.Fatalf("preserved API key = %q", got)
+	}
+
+	snapshot.Providers[0].Prefix = "beta"
+	_, errors = snapshot.Resolve(existing)
+	if len(errors) == 0 || errors[0].Field != "providers[0].api_key" {
+		t.Fatalf("changed prefix errors = %+v", errors)
+	}
+}
+
+func TestRenderUpdatePreservesCommentsAndUnknownFields(t *testing.T) {
+	original := []byte(`# top comment
+future_setting: keep
+server:
+  host: 127.0.0.1 # host comment
+retry:
+  max_attempts: 4
+providers:
+  - prefix: alpha
+    base_url: https://old.invalid
+    api_key: old-secret
+    future_provider: keep
+codex:
+  overwrite_catalog: false
+  future_codex: keep
+  models:
+    old: # model comment
+      default_reasoning_level: low
+      supported_reasoning_levels: [low]
+      future_model: keep
+`)
+	path := filepath.Join(t.TempDir(), "onellm-router.yaml")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed.Providers[0].BaseURL = "https://new.invalid"
+	proposed.Codex.Models["old"] = CodexModelConfig{DefaultReasoningLevel: "high", SupportedReasoningLevels: []string{"high"}}
+
+	updated, err := RenderUpdate(original, proposed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"# top comment", "# host comment", "# model comment", "future_setting: keep", "future_provider: keep", "future_codex: keep", "future_model: keep", "host: 127.0.0.1", "max_attempts: 4", "overwrite_catalog: false", "https://new.invalid"} {
+		if !bytes.Contains(updated, []byte(expected)) {
+			t.Errorf("updated YAML omitted %q:\n%s", expected, updated)
+		}
+	}
+}
+
+func TestApplyCreatesExactBackupAndPreservesMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "onellm-router.yaml")
+	original := []byte("# original\nproviders:\n  - prefix: alpha\n    base_url: https://old.invalid\n    api_key: old-secret\n")
+	if err := os.WriteFile(path, original, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed.Providers[0].APIKey = "new-" + "secret"
+	if err := Apply(path, proposed); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := os.ReadFile(path + ".bak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(backup, original) {
+		t.Fatalf("backup differs from pre-image:\n%s", backup)
+	}
+	if bytes.Contains(backup, []byte(proposed.Providers[0].APIKey)) {
+		t.Fatal("backup contains proposed API key")
+	}
+	backupInfo, err := os.Stat(path + ".bak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := backupInfo.Mode().Perm(), originalInfo.Mode().Perm(); got != want {
+		t.Fatalf("backup mode = %o, want original mode %o", got, want)
+	}
+}
+
+func TestRenderUpdateAddsMissingManagedSections(t *testing.T) {
+	original := []byte("server:\n  host: 127.0.0.1\n")
+	proposed := DefaultConfig()
+	proposed.Providers = []ProviderConfig{{Prefix: "alpha", BaseURL: "https://example.invalid", APIKey: "secret"}}
+	proposed.ModelSlots.Default = "alpha/model"
+
+	updated, err := RenderUpdate(original, proposed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"host: 127.0.0.1", "providers:", "prefix: alpha", "codex:", "model_slots:"} {
+		if !bytes.Contains(updated, []byte(expected)) {
+			t.Errorf("updated YAML omitted %q:\n%s", expected, updated)
+		}
+	}
+}
 
 func TestDefaultConfigOverwritesCodexCatalog(t *testing.T) {
 	if !DefaultConfig().Codex.OverwriteCatalog {
