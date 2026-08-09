@@ -5,9 +5,9 @@
 
 namespace {
 
-const autoStartError = QStringLiteral(
+const QString autoStartError = QStringLiteral(
     "Desktop autostart is unsupported on this platform");
-const applicationRestartError = QStringLiteral(
+const QString applicationRestartError = QStringLiteral(
     "Application restart integration is unsupported on this platform");
 
 void setError(QString *error, const QString &message)
