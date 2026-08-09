@@ -4,6 +4,16 @@ All notable user-facing changes to OneLLMRouter are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Added per-attempt Usage collection for Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses across direct, translated, streaming, and non-streaming paths. Records preserve unknown token fields and link retries through a stable request ID plus one-based upstream attempt number.
+- Added `stats day`, `stats week`, and `stats month` table/JSON reports grouped by provider, requested model, and upstream model, plus Qt Providers, Models, and Usage pages backed by Core configuration and statistics contracts.
+- Added Windows, Linux, and macOS Go and Qt build/test gates. Release artifacts remain Windows x64 only; Linux/macOS installers, autostart, daemonization, and application restart integration are not shipped.
+
+### Changed
+
+- Preserved the existing same-provider retry defaults and the no-replay boundary after streaming output begins. Usage now records successful, exhausted, client-cancelled, and service-shutdown attempts without changing retry parameters.
+
 ### Fixed
 
 - OpenAI Responses streams now retry pre-output model-capacity failures through the configured upstream retry policy, return the final original SSE failure when retries do not recover, and never replay output that has already started.

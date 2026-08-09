@@ -9,7 +9,7 @@ on:
       version:
         description: "Release version (major.minor.patch)"
         required: true
-        default: "1.4.1"
+        default: "1.5.0"
         type: string
 
 permissions:
@@ -32,8 +32,8 @@ jobs:
           go-version: "1.25.x"
           cache: true
 
-      - name: Verify Go command package
-        run: go test -count=1 ./cmd/onellm-router
+      - name: Verify Go packages
+        run: go test -count=1 ./...
 
       - name: Build Go command package
         env:

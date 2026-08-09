@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+### 新增
+
+- 为 Anthropic Messages、OpenAI Chat Completions 和 OpenAI Responses 的直通、翻译、流式和非流式路径新增逐 attempt Usage 采集。记录保留未知 token 字段，并通过稳定的 request ID 和从 1 开始的上游尝试序号关联重试。
+- 新增按 Provider、请求模型和上游模型分组的 `stats day`、`stats week`、`stats month` 表格/JSON 统计，以及由 Core 配置与统计契约驱动的 Qt Providers、Models 和 Usage 页面。
+- 新增 Windows、Linux、macOS 的 Go 与 Qt 构建/测试门禁。发行产物仍仅提供 Windows x64；Linux/macOS 安装包、开机自启、daemon 和应用重启集成未交付。
+
+### 变更
+
+- 保持现有同 Provider 重试默认值和流式输出开始后不重放的边界。Usage 现在覆盖成功、重试耗尽、客户端取消和服务关闭 attempt，不改变 Retry 参数。
+
 ### 修复
 
 - OpenAI Responses 流在输出开始前遇到模型容量错误时，现在会按配置的上游重试策略处理；重试未恢复时返回最后一次原始 SSE 失败，并且绝不重放已经开始的输出。

@@ -4,7 +4,7 @@ param(
     [switch]$TestOnly,
     [switch]$Desktop,
     [switch]$Installer,
-    [string]$Version = "1.4.2",
+    [string]$Version = "1.5.0",
     [string]$QtRoot = $env:QT_ROOT,
     [string]$StageDirectory = "",
     [string]$CMake = "cmake",
@@ -81,7 +81,7 @@ Push-Location $PSScriptRoot
 try {
     if ($TestOnly) {
         Write-Host "=== Go tests ===" -ForegroundColor Cyan
-        & go test ./...
+        & go test -count=1 ./...
         if ($LASTEXITCODE -ne 0) { throw "Go tests failed" }
         Write-Host "Go tests passed" -ForegroundColor Green
         return

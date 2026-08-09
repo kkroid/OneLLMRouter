@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kkroid/onellm-router/internal/config"
+	onellmLog "github.com/kkroid/onellm-router/internal/log"
 	"github.com/kkroid/onellm-router/internal/router"
 	"github.com/kkroid/onellm-router/internal/upstream"
 	"github.com/kkroid/onellm-router/internal/usage"
@@ -257,6 +259,8 @@ func TestAnthropicUsageCollectionRecordsEachRetryAttempt(t *testing.T) {
 	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
 	handler.Usage = usage.NewCollector(writer)
 	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","messages":[]}`))
+	request = request.WithContext(onellmLog.WithRequestID(request.Context()))
+	requestID := onellmLog.RequestIDFromContext(request.Context())
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
@@ -264,11 +268,80 @@ func TestAnthropicUsageCollectionRecordsEachRetryAttempt(t *testing.T) {
 	if recorder.Code != http.StatusOK || len(writer.records) != 2 {
 		t.Fatalf("status = %d, records = %+v", recorder.Code, writer.records)
 	}
-	if writer.records[0].Status != usage.StatusError || writer.records[0].UpstreamAttempt != 1 || writer.records[0].OutputTokens == nil || *writer.records[0].OutputTokens != 0 {
+	if writer.records[0].RequestID != requestID || writer.records[0].Status != usage.StatusError || writer.records[0].UpstreamAttempt != 1 || writer.records[0].OutputTokens == nil || *writer.records[0].OutputTokens != 0 {
 		t.Fatalf("first record = %+v", writer.records[0])
 	}
-	if writer.records[1].Status != usage.StatusSuccess || writer.records[1].UpstreamAttempt != 2 || writer.records[1].InputTokens == nil || *writer.records[1].InputTokens != 3 {
+	if writer.records[1].RequestID != requestID || writer.records[1].Status != usage.StatusSuccess || writer.records[1].UpstreamAttempt != 2 || writer.records[1].InputTokens == nil || *writer.records[1].InputTokens != 3 {
 		t.Fatalf("second record = %+v", writer.records[1])
+	}
+}
+
+func TestAnthropicUsageCollectionRecordsExhaustedRetryAttempts(t *testing.T) {
+	var calls int
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, `{"error":{"message":"temporary"},"usage":{"input_tokens":`+strconv.Itoa(calls)+`}}`)
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{Prefix: "ds", BaseURL: mockAPI.URL, APIKey: "secret", Models: []string{"m1"}}})
+	writer := &usageRecordWriter{}
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+	handler.Usage = usage.NewCollector(writer)
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","messages":[]}`))
+	request = request.WithContext(onellmLog.WithRequestID(request.Context()))
+	requestID := onellmLog.RequestIDFromContext(request.Context())
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadGateway || calls != 2 || len(writer.records) != 2 {
+		t.Fatalf("status = %d, calls = %d, records = %+v", recorder.Code, calls, writer.records)
+	}
+	for index, record := range writer.records {
+		if record.RequestID != requestID || record.UpstreamAttempt != index+1 || record.Status != usage.StatusError || record.InputTokens == nil || *record.InputTokens != index+1 {
+			t.Fatalf("record %d = %+v", index, record)
+		}
+	}
+}
+
+func TestAnthropicUsageCollectionLinksCancellationAndShutdown(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		cause error
+	}{
+		{name: "client cancellation", cause: context.Canceled},
+		{name: "service shutdown", cause: upstream.ErrServiceShutdown},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(context.Background())
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				cancel(test.cause)
+				<-request.Context().Done()
+				return nil, request.Context().Err()
+			})}
+			resolver := router.NewResolver([]router.Provider{{Prefix: "ds", BaseURL: "http://unused", APIKey: "secret", Models: []string{"m1"}}})
+			writer := &usageRecordWriter{}
+			handler := NewHandler(resolver, client, client, slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
+			handler.Usage = usage.NewCollector(writer)
+			request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"ds/m1","messages":[]}`)).WithContext(ctx)
+			request = request.WithContext(onellmLog.WithRequestID(request.Context()))
+			requestID := onellmLog.RequestIDFromContext(request.Context())
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Body.Len() != 0 || len(writer.records) != 1 {
+				t.Fatalf("body = %q, records = %+v", recorder.Body.String(), writer.records)
+			}
+			record := writer.records[0]
+			if record.RequestID != requestID || record.UpstreamAttempt != 1 || record.Status != usage.StatusCancelled || record.UsageSource != nil || record.InputTokens != nil || record.OutputTokens != nil {
+				t.Fatalf("record = %+v", record)
+			}
+		})
 	}
 }
 

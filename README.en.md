@@ -58,7 +58,7 @@ Set-Location OneLLMRouter
 pwsh .\build.ps1
 ```
 
-The result is `dist/onellm-router-v1.4.2.exe`.
+The result is `dist/onellm-router-v1.5.0.exe`.
 
 Building the desktop Setup package also requires Qt 6.8.3 for MSVC 2022 x64, CMake, MSVC 2022, and Inno Setup 6:
 
@@ -67,7 +67,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-The installer is written to `dist/OneLLMRouter-1.4.2-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`.
+The installer is written to `dist/OneLLMRouter-1.5.0-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`.
 
 ## Configuration
 
@@ -140,7 +140,7 @@ Configured provider models take precedence over upstream discovery. When `models
 ## Run
 
 ```powershell
-.\dist\onellm-router-v1.4.2.exe
+.\dist\onellm-router-v1.5.0.exe
 ```
 
 The service prints the Claude Code environment block at startup. The main CLI commands are:
@@ -152,7 +152,12 @@ onellm-router status         Check local status
 onellm-router install        Register portable autostart
 onellm-router uninstall      Remove portable autostart
 onellm-router version        Print the version
+onellm-router stats day      Show UTC daily token usage
+onellm-router stats week     Show ISO-week token usage
+onellm-router stats month    Show UTC monthly token usage
 ```
+
+The `stats` commands accept an optional period label and `--json`. Usage is grouped by provider, requested model, and upstream model, with input, output, cache-read, cache-write, and reasoning tokens kept separate. Missing upstream fields are reported as unknown rather than zero. Records use one stable request ID with a one-based upstream attempt number, including failed, exhausted, cancelled, and service-shutdown attempts.
 
 ## Claude Code
 
@@ -202,11 +207,25 @@ Providers may charge for failed or ambiguous attempts. OneLLMRouter cannot guara
 
 ## Windows Desktop
 
-The Qt tray displays router health, version, model count, configured port, and local SOCKS5 reachability. It chooses English or Simplified Chinese from the system locale.
+The Qt desktop provides Providers and Models editors backed by Core validation and atomic configuration updates, plus a Usage page that reads the Core day/week/month statistics. Existing API keys are never displayed; configuration changes require a Core restart. The tray also displays router health, version, model count, configured port, and local SOCKS5 reachability. It chooses English or Simplified Chinese from the system locale.
 
 The tray controls only a core process that it started itself. A matching externally started router is attached read-only, while an unrelated listener is reported as a port conflict. Stop and restart are graceful; the application does not enumerate or terminate processes by image name.
 
 Setup upgrades preserve configuration, API keys, logs, and generated catalogs. Windows Restart Manager closes and restarts a running tray while binaries are replaced. The optional start-on-login task registers only the tray, which then owns its core child.
+
+## Platform Support
+
+| Capability | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| Go Core source build and test | Yes | Yes | Yes |
+| Qt desktop source build and offscreen tests | Yes | Yes | Yes |
+| Foreground Core service | Yes | Yes | Yes |
+| Portable release artifact | Windows x64 `.exe` | Not published | Not published |
+| Desktop installer/package | Inno Setup, per-user | Not shipped | Not shipped |
+| Portable `--daemon`, `install`, `uninstall` | Supported | Unsupported | Unsupported |
+| Desktop autostart and application restart integration | Supported | Unsupported | Unsupported |
+
+The release workflow compiles and tests Go and Qt on all three operating systems, but v1.5.0 publishes only the Windows x64 portable executable and Setup installer. Linux and macOS support is a source-build foundation, not a complete native installation or lifecycle experience.
 
 ## Logging
 

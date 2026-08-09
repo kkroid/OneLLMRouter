@@ -71,7 +71,7 @@ git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter
 pwsh build.ps1
 ```
 
-便携版产物在 `dist/onellm-router-v1.4.2.exe`。
+便携版产物在 `dist/onellm-router-v1.5.0.exe`。
 
 构建桌面安装包还需要 Qt 6.8.3（MSVC 2022 x64）、CMake、MSVC 2022 和 Inno Setup 6：
 
@@ -80,7 +80,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-安装包输出到 `dist/OneLLMRouter-1.4.2-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
+安装包输出到 `dist/OneLLMRouter-1.5.0-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
 
 ### 2. 配置
 
@@ -150,7 +150,7 @@ model_slots:
 ### 3. 启动
 
 ```bash
-.\dist\onellm-router-v1.4.2.exe
+.\dist\onellm-router-v1.5.0.exe
 ```
 
 启动时会打印 Claude Code 的 `settings.json`，可直接用于配置客户端。
@@ -262,7 +262,30 @@ onellm-router status         # 检查运行状态
 onellm-router install        # 注册开机自启
 onellm-router uninstall      # 取消开机自启
 onellm-router version        # 查看版本
+onellm-router stats day      # 查看 UTC 日 Token Usage
+onellm-router stats week     # 查看 ISO 周 Token Usage
+onellm-router stats month    # 查看 UTC 月 Token Usage
 ```
+
+`stats` 命令支持可选时间标签和 `--json`，按 Provider、请求模型和上游模型分组，分别展示 input、output、cache read、cache write 和 reasoning token。上游没有返回的字段会标记为未知，不会伪装成零。一次客户端请求共享稳定的 `request_id`，每次上游尝试使用从 1 开始的 `upstream_attempt`，包括失败、重试耗尽、客户端取消和服务关闭。
+
+### 桌面配置与 Usage
+
+Qt 桌面提供 Providers、Models 和 Usage 页面。Provider/模型修改由 Core 校验并原子写回，旧 API Key 不会显示，保存后需要重启 Core 生效；附着到外部 Core 时保持只读。Usage 页面直接读取 Core 的日/周/月统计，不自行聚合 JSONL。
+
+### 平台能力矩阵
+
+| 能力 | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| Go Core 源码构建与测试 | 支持 | 支持 | 支持 |
+| Qt 桌面源码构建与离屏测试 | 支持 | 支持 | 支持 |
+| 前台运行 Core 服务 | 支持 | 支持 | 支持 |
+| 便携发行产物 | Windows x64 `.exe` | 未发布 | 未发布 |
+| 桌面安装包 | 按用户安装的 Inno Setup | 未交付 | 未交付 |
+| 便携版 `--daemon`、`install`、`uninstall` | 支持 | 不支持 | 不支持 |
+| 桌面开机自启与应用重启集成 | 支持 | 不支持 | 不支持 |
+
+发布流水线会在三个系统上编译并测试 Go 和 Qt，但 v1.5.0 只发布 Windows x64 便携版和 Setup 安装包。Linux/macOS 当前是可从源码构建的跨平台基础，不代表完整的原生安装和生命周期体验。
 
 ### 内部桌面契约
 

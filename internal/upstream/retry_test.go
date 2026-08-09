@@ -56,6 +56,23 @@ func TestRetryRebuildsRequestUntilSuccess(t *testing.T) {
 	}
 }
 
+func TestApprovedRetryDefaultsRemainBounded(t *testing.T) {
+	got := config.DefaultConfig().Retry
+	want := config.RetryConfig{
+		Enabled:         true,
+		MaxAttempts:     15,
+		StatusCodes:     []int{408, 409, 425, 429, 500, 502, 503, 504},
+		InitialDelay:    config.Duration(time.Second),
+		MaxDelay:        config.Duration(30 * time.Second),
+		MaxElapsed:      config.Duration(5 * time.Minute),
+		Jitter:          0.2,
+		HonorRetryAfter: true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("retry defaults = %+v, want %+v", got, want)
+	}
+}
+
 func TestRetryExposesStableOneBasedAttemptIdentity(t *testing.T) {
 	executor, _ := newTestExecutor(retryPolicy())
 	var identities []AttemptIdentity
