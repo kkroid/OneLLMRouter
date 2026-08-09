@@ -1,6 +1,9 @@
 package translate
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestCoreTypes_CanRepresentCurrentRequestSurface(t *testing.T) {
 	temp := 0.2
@@ -144,6 +147,65 @@ func TestOpenAIResponseToCore_WithToolCall(t *testing.T) {
 	}
 	if core.Usage.InputTokens != 3 || core.Usage.OutputTokens != 4 {
 		t.Fatalf("usage mismatch: %+v", core.Usage)
+	}
+	if !core.Usage.InputTokensPresent || !core.Usage.OutputTokensPresent {
+		t.Fatalf("usage presence mismatch: %+v", core.Usage)
+	}
+}
+
+func TestCoreUsage_DistinguishesAbsentAndExplicitZero(t *testing.T) {
+	absent := CoreUsage{}
+	explicitZero := CoreUsage{InputTokensPresent: true}
+
+	if absent.InputTokens != explicitZero.InputTokens {
+		t.Fatalf("token values differ: absent=%d explicit=%d", absent.InputTokens, explicitZero.InputTokens)
+	}
+	if absent.InputTokensPresent || !explicitZero.InputTokensPresent {
+		t.Fatalf("presence was not preserved: absent=%+v explicit=%+v", absent, explicitZero)
+	}
+}
+
+func TestResponseAdaptersPreserveMissingAndZeroTokenFields(t *testing.T) {
+	var missing OpenAIResponse
+	if err := json.Unmarshal([]byte(`{"usage":{}}`), &missing); err != nil {
+		t.Fatal(err)
+	}
+	missingCore := OpenAIResponseToCore(&missing)
+	if missingCore.Usage.InputTokensPresent || missingCore.Usage.OutputTokensPresent {
+		t.Fatalf("missing tokens reported as present: %+v", missingCore.Usage)
+	}
+
+	var zero AnthropicResponse
+	if err := json.Unmarshal([]byte(`{"usage":{"input_tokens":0,"output_tokens":0}}`), &zero); err != nil {
+		t.Fatal(err)
+	}
+	zeroCore := AnthropicResponseToCore(&zero)
+	if !zeroCore.Usage.InputTokensPresent || !zeroCore.Usage.OutputTokensPresent {
+		t.Fatalf("explicit zero tokens reported as missing: %+v", zeroCore.Usage)
+	}
+}
+
+func TestCoreUsage_CanRepresentAllTokenCategories(t *testing.T) {
+	usage := CoreUsage{
+		InputTokens:             1,
+		InputTokensPresent:      true,
+		OutputTokens:            2,
+		OutputTokensPresent:     true,
+		CacheReadTokens:         3,
+		CacheReadTokensPresent:  true,
+		CacheWriteTokens:        4,
+		CacheWriteTokensPresent: true,
+		ReasoningTokens:         5,
+		ReasoningTokensPresent:  true,
+	}
+
+	if usage.InputTokens != 1 || usage.OutputTokens != 2 || usage.CacheReadTokens != 3 ||
+		usage.CacheWriteTokens != 4 || usage.ReasoningTokens != 5 {
+		t.Fatalf("usage categories were not preserved: %+v", usage)
+	}
+	if !usage.InputTokensPresent || !usage.OutputTokensPresent || !usage.CacheReadTokensPresent ||
+		!usage.CacheWriteTokensPresent || !usage.ReasoningTokensPresent {
+		t.Fatalf("usage presence was not preserved: %+v", usage)
 	}
 }
 

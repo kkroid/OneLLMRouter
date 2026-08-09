@@ -12,8 +12,10 @@ func OpenAIResponseToCore(openai *OpenAIResponse) *CoreResponse {
 		Model: openai.Model,
 		Role:  "assistant",
 		Usage: CoreUsage{
-			InputTokens:  openai.Usage.PromptTokens,
-			OutputTokens: openai.Usage.CompletionTokens,
+			InputTokens:         openai.Usage.PromptTokens,
+			InputTokensPresent:  openai.Usage.PromptTokensPresent || openai.Usage.PromptTokens != 0,
+			OutputTokens:        openai.Usage.CompletionTokens,
+			OutputTokensPresent: openai.Usage.CompletionTokensPresent || openai.Usage.CompletionTokens != 0,
 		},
 	}
 	if len(openai.Choices) == 0 {
@@ -102,8 +104,10 @@ func AnthropicResponseToCore(anthropic *AnthropicResponse) *CoreResponse {
 		Model: anthropic.Model,
 		Role:  anthropic.Role,
 		Usage: CoreUsage{
-			InputTokens:  anthropic.Usage.InputTokens,
-			OutputTokens: anthropic.Usage.OutputTokens,
+			InputTokens:         anthropic.Usage.InputTokens,
+			InputTokensPresent:  anthropic.Usage.InputTokensPresent || anthropic.Usage.InputTokens != 0,
+			OutputTokens:        anthropic.Usage.OutputTokens,
+			OutputTokensPresent: anthropic.Usage.OutputTokensPresent || anthropic.Usage.OutputTokens != 0,
 		},
 	}
 	if anthropic.StopReason != nil {

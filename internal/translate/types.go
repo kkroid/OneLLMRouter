@@ -1,5 +1,7 @@
 package translate
 
+import "encoding/json"
+
 // ========== Anthropic Request (what we receive) ==========
 
 // AnthropicContentBlock is a content block in Anthropic messages.
@@ -78,8 +80,30 @@ type AnthropicResponse struct {
 
 // AnthropicUsage contains token usage info.
 type AnthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens         int  `json:"input_tokens"`
+	InputTokensPresent  bool `json:"-"`
+	OutputTokens        int  `json:"output_tokens"`
+	OutputTokensPresent bool `json:"-"`
+}
+
+// UnmarshalJSON preserves whether each token field was present in the payload.
+func (u *AnthropicUsage) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		InputTokens  *int `json:"input_tokens"`
+		OutputTokens *int `json:"output_tokens"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.InputTokens != nil {
+		u.InputTokens = *decoded.InputTokens
+		u.InputTokensPresent = true
+	}
+	if decoded.OutputTokens != nil {
+		u.OutputTokens = *decoded.OutputTokens
+		u.OutputTokensPresent = true
+	}
+	return nil
 }
 
 // ========== Anthropic SSE Events (streaming) ==========
@@ -189,9 +213,33 @@ type OpenAIChoice struct {
 
 // OpenAIUsage contains token usage for OpenAI.
 type OpenAIUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens            int  `json:"prompt_tokens"`
+	PromptTokensPresent     bool `json:"-"`
+	CompletionTokens        int  `json:"completion_tokens"`
+	CompletionTokensPresent bool `json:"-"`
+	TotalTokens             int  `json:"total_tokens"`
+}
+
+// UnmarshalJSON preserves whether each token field was present in the payload.
+func (u *OpenAIUsage) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		PromptTokens     *int `json:"prompt_tokens"`
+		CompletionTokens *int `json:"completion_tokens"`
+		TotalTokens      int  `json:"total_tokens"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.PromptTokens != nil {
+		u.PromptTokens = *decoded.PromptTokens
+		u.PromptTokensPresent = true
+	}
+	if decoded.CompletionTokens != nil {
+		u.CompletionTokens = *decoded.CompletionTokens
+		u.CompletionTokensPresent = true
+	}
+	u.TotalTokens = decoded.TotalTokens
+	return nil
 }
 
 // ========== OpenAI Stream Chunk ==========

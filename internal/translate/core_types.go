@@ -57,10 +57,19 @@ type CoreToolChoice struct {
 	Name string
 }
 
-// CoreUsage stores input/output token usage.
+// CoreUsage stores protocol-neutral token usage. Presence fields distinguish an
+// explicit zero from a value that was not reported by the upstream protocol.
 type CoreUsage struct {
-	InputTokens  int
-	OutputTokens int
+	InputTokens             int
+	InputTokensPresent      bool
+	OutputTokens            int
+	OutputTokensPresent     bool
+	CacheReadTokens         int
+	CacheReadTokensPresent  bool
+	CacheWriteTokens        int
+	CacheWriteTokensPresent bool
+	ReasoningTokens         int
+	ReasoningTokensPresent  bool
 }
 
 // CoreResponse is the protocol-neutral response shape used inside the translator.
