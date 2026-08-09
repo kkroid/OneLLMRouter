@@ -55,7 +55,7 @@ func TestParseRangeValidatesISOWeekYear(t *testing.T) {
 	}
 }
 
-func TestAggregateDirGroupsAttemptsAndSuccessfulRequests(t *testing.T) {
+func TestAggregateDirGroupsTokenUsageAndDeduplicatesAttempts(t *testing.T) {
 	dir := t.TempDir()
 	selected, err := ParseRange(PeriodDay, "2026-08-09", time.Time{})
 	if err != nil {
@@ -86,26 +86,15 @@ func TestAggregateDirGroupsAttemptsAndSuccessfulRequests(t *testing.T) {
 		t.Fatalf("result = %+v", got)
 	}
 	first := got.Groups[0]
-	if first.Provider != "provider-a" || first.AllAttempts.Attempts != 4 || first.AllAttempts.RetryAttempts != 2 ||
-		first.AllAttempts.RetriedRequests != 1 || first.AllAttempts.UnknownRecords != 1 ||
-		first.AllAttempts.Tokens.Input != 5 || first.AllAttempts.Tokens.Output != 4 || first.AllAttempts.Tokens.CacheRead != 0 {
-		t.Fatalf("provider-a attempts = %+v", first.AllAttempts)
+	if first.Provider != "provider-a" || first.Tokens.Input != 5 || first.Tokens.Output != 4 || first.Tokens.CacheRead != 0 {
+		t.Fatalf("provider-a tokens = %+v", first.Tokens)
 	}
-	if first.AllAttempts.UnknownTokens != (TokenUnknownCounts{Input: 1, Output: 2, CacheRead: 3, CacheWrite: 4, Reasoning: 4}) {
-		t.Fatalf("provider-a unknown tokens = %+v", first.AllAttempts.UnknownTokens)
-	}
-	if first.RequestOutcomes != (OutcomeCounts{Requests: 2, Success: 1, Unknown: 1}) {
-		t.Fatalf("provider-a outcomes = %+v", first.RequestOutcomes)
-	}
-	if first.SuccessfulRequestUsage.Requests != 1 || first.SuccessfulRequestUsage.Tokens.Input != 3 ||
-		first.SuccessfulRequestUsage.Tokens.Output != 4 || first.SuccessfulRequestUsage.UnknownRecords != 0 ||
-		first.SuccessfulRequestUsage.UnknownTokens != (TokenUnknownCounts{CacheWrite: 1, Reasoning: 1}) {
-		t.Fatalf("provider-a successful usage = %+v", first.SuccessfulRequestUsage)
+	if first.UnknownTokens != (TokenUnknownCounts{Input: 1, Output: 2, CacheRead: 3, CacheWrite: 4, Reasoning: 4}) {
+		t.Fatalf("provider-a unknown tokens = %+v", first.UnknownTokens)
 	}
 	second := got.Groups[1]
-	if second.Provider != "provider-b" || second.AllAttempts.UnknownRecords != 1 ||
-		second.AllAttempts.UnknownTokens != (TokenUnknownCounts{Input: 1, Output: 1, CacheRead: 1, CacheWrite: 1, Reasoning: 1}) ||
-		second.RequestOutcomes.Requests != 1 || second.RequestOutcomes.Cancelled != 1 || second.SuccessfulRequestUsage.Requests != 0 {
+	if second.Provider != "provider-b" ||
+		second.UnknownTokens != (TokenUnknownCounts{Input: 1, Output: 1, CacheRead: 1, CacheWrite: 1, Reasoning: 1}) {
 		t.Fatalf("provider-b group = %+v", second)
 	}
 
@@ -118,7 +107,7 @@ func TestAggregateDirGroupsAttemptsAndSuccessfulRequests(t *testing.T) {
 	}
 }
 
-func TestAggregateDirAssignsCrossMidnightOutcomeToFinalAttemptDay(t *testing.T) {
+func TestAggregateDirAssignsEachAttemptToItsRecordDay(t *testing.T) {
 	dir := t.TempDir()
 	source := SourceResponse
 	records := []Record{
@@ -139,8 +128,7 @@ func TestAggregateDirAssignsCrossMidnightOutcomeToFinalAttemptDay(t *testing.T) 
 		t.Fatalf("earlier groups = %+v", earlier.Groups)
 	}
 	earlierGroup := earlier.Groups[0]
-	if earlierGroup.AllAttempts.Attempts != 1 || earlierGroup.AllAttempts.Tokens.Input != 2 ||
-		earlierGroup.RequestOutcomes != (OutcomeCounts{}) || earlierGroup.SuccessfulRequestUsage.Requests != 0 {
+	if earlierGroup.Tokens.Input != 2 || earlierGroup.Tokens.Output != 0 {
 		t.Fatalf("earlier group = %+v", earlierGroup)
 	}
 
@@ -156,10 +144,7 @@ func TestAggregateDirAssignsCrossMidnightOutcomeToFinalAttemptDay(t *testing.T) 
 		t.Fatalf("later groups = %+v", later.Groups)
 	}
 	laterGroup := later.Groups[0]
-	if laterGroup.AllAttempts.Attempts != 1 || laterGroup.AllAttempts.RetryAttempts != 1 ||
-		laterGroup.AllAttempts.RetriedRequests != 1 || laterGroup.RequestOutcomes != (OutcomeCounts{Requests: 1, Success: 1}) ||
-		laterGroup.SuccessfulRequestUsage.Requests != 1 || laterGroup.SuccessfulRequestUsage.Tokens.Input != 3 ||
-		laterGroup.SuccessfulRequestUsage.Tokens.Output != 4 {
+	if laterGroup.Tokens.Input != 3 || laterGroup.Tokens.Output != 4 {
 		t.Fatalf("later group = %+v", laterGroup)
 	}
 }
@@ -183,8 +168,7 @@ func TestAggregateDirHonorsISOWeekYearRecordBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Groups) != 1 || got.Groups[0].AllAttempts.Attempts != 2 ||
-		got.Groups[0].AllAttempts.Tokens.Input != 3 || got.Groups[0].RequestOutcomes.Requests != 2 {
+	if len(got.Groups) != 1 || got.Groups[0].Tokens.Input != 3 {
 		t.Fatalf("result = %+v", got)
 	}
 }
@@ -208,8 +192,7 @@ func TestAggregateDirHonorsMonthRecordBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Groups) != 1 || got.Groups[0].AllAttempts.Attempts != 2 ||
-		got.Groups[0].AllAttempts.Tokens.Input != 3 || got.Groups[0].RequestOutcomes.Requests != 2 {
+	if len(got.Groups) != 1 || got.Groups[0].Tokens.Input != 3 {
 		t.Fatalf("result = %+v", got)
 	}
 }

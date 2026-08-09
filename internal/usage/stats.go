@@ -42,37 +42,12 @@ type TokenUnknownCounts struct {
 	Reasoning  int `json:"reasoning_tokens"`
 }
 
-type AttemptStats struct {
-	Attempts        int                `json:"attempts"`
-	RetryAttempts   int                `json:"retry_attempts"`
-	RetriedRequests int                `json:"retried_requests"`
-	UnknownRecords  int                `json:"unknown_records"`
-	Tokens          TokenTotals        `json:"tokens"`
-	UnknownTokens   TokenUnknownCounts `json:"unknown_tokens"`
-}
-
-type OutcomeCounts struct {
-	Requests  int `json:"requests"`
-	Success   int `json:"success"`
-	Error     int `json:"error"`
-	Cancelled int `json:"cancelled"`
-	Unknown   int `json:"unknown"`
-}
-
-type SuccessfulRequestUsage struct {
-	Requests       int                `json:"requests"`
-	UnknownRecords int                `json:"unknown_records"`
+type StatsGroup struct {
+	Provider       string             `json:"provider"`
+	RequestedModel string             `json:"requested_model"`
+	UpstreamModel  string             `json:"upstream_model"`
 	Tokens         TokenTotals        `json:"tokens"`
 	UnknownTokens  TokenUnknownCounts `json:"unknown_tokens"`
-}
-
-type StatsGroup struct {
-	Provider               string                 `json:"provider"`
-	RequestedModel         string                 `json:"requested_model"`
-	UpstreamModel          string                 `json:"upstream_model"`
-	AllAttempts            AttemptStats           `json:"all_attempts"`
-	RequestOutcomes        OutcomeCounts          `json:"request_outcomes"`
-	SuccessfulRequestUsage SuccessfulRequestUsage `json:"successful_request_usage"`
 }
 
 type StatsResult struct {
@@ -141,8 +116,6 @@ func AggregateDir(baseDir string, selected Range) (StatsResult, error) {
 	}
 
 	groups := make(map[groupKey]*StatsGroup)
-	retriedRequests := make(map[groupKey]map[string]struct{})
-	allRecords := make([]Record, 0)
 	seen := make(map[attemptKey]struct{})
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
@@ -159,45 +132,15 @@ func AggregateDir(baseDir string, selected Range) (StatsResult, error) {
 				continue
 			}
 			seen[key] = struct{}{}
-			allRecords = append(allRecords, record)
 			if record.Time.Before(selected.Start) || !record.Time.Before(selected.End) {
 				continue
 			}
 			group := getGroup(groups, record)
-			group.AllAttempts.Attempts++
-			if record.UpstreamAttempt > 1 {
-				group.AllAttempts.RetryAttempts++
-				key := keyForRecord(record)
-				if retriedRequests[key] == nil {
-					retriedRequests[key] = make(map[string]struct{})
-				}
-				retriedRequests[key][record.RequestID] = struct{}{}
-			}
-			addUsage(&group.AllAttempts.Tokens, &group.AllAttempts.UnknownTokens, &group.AllAttempts.UnknownRecords, record)
+			addUsage(&group.Tokens, &group.UnknownTokens, record)
 		}
 	}
 
-	finalRecords := make(map[string]Record)
-	for _, record := range allRecords {
-		previous, exists := finalRecords[record.RequestID]
-		if !exists || record.UpstreamAttempt > previous.UpstreamAttempt {
-			finalRecords[record.RequestID] = record
-		}
-	}
-	for _, record := range finalRecords {
-		if record.Time.Before(selected.Start) || !record.Time.Before(selected.End) {
-			continue
-		}
-		group := getGroup(groups, record)
-		addOutcome(&group.RequestOutcomes, record.Status)
-		if record.Status == StatusSuccess {
-			group.SuccessfulRequestUsage.Requests++
-			addUsage(&group.SuccessfulRequestUsage.Tokens, &group.SuccessfulRequestUsage.UnknownTokens, &group.SuccessfulRequestUsage.UnknownRecords, record)
-		}
-	}
-
-	for key, group := range groups {
-		group.AllAttempts.RetriedRequests = len(retriedRequests[key])
+	for _, group := range groups {
 		result.Groups = append(result.Groups, *group)
 	}
 	sort.Slice(result.Groups, func(i, j int) bool {
@@ -238,10 +181,7 @@ func keyForRecord(record Record) groupKey {
 	return groupKey{record.Provider, record.RequestedModel, record.UpstreamModel}
 }
 
-func addUsage(totals *TokenTotals, unknownTokens *TokenUnknownCounts, unknownRecords *int, record Record) {
-	if record.UsageSource == nil {
-		(*unknownRecords)++
-	}
+func addUsage(totals *TokenTotals, unknownTokens *TokenUnknownCounts, record Record) {
 	addToken(&totals.Input, &unknownTokens.Input, record.InputTokens)
 	addToken(&totals.Output, &unknownTokens.Output, record.OutputTokens)
 	addToken(&totals.CacheRead, &unknownTokens.CacheRead, record.CacheReadTokens)
@@ -255,18 +195,4 @@ func addToken(total *int64, unknown *int, value *int) {
 		return
 	}
 	(*unknown)++
-}
-
-func addOutcome(outcomes *OutcomeCounts, status Status) {
-	outcomes.Requests++
-	switch status {
-	case StatusSuccess:
-		outcomes.Success++
-	case StatusError:
-		outcomes.Error++
-	case StatusCancelled:
-		outcomes.Cancelled++
-	default:
-		outcomes.Unknown++
-	}
 }

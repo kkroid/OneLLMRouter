@@ -65,26 +65,16 @@ func writeStatsTable(output io.Writer, result usage.StatsResult) error {
 	}
 
 	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "PROVIDER\tREQUESTED MODEL\tUPSTREAM MODEL\tATTEMPTS\tRETRY ATTEMPTS\tRETRIED REQUESTS\tREQUESTS\tSUCCESS\tERROR\tCANCELLED\tUNKNOWN\tUNKNOWN USAGE\tINPUT\tOUTPUT\tCACHE READ\tCACHE WRITE\tREASONING\tUNKNOWN INPUT\tUNKNOWN OUTPUT\tUNKNOWN CACHE READ\tUNKNOWN CACHE WRITE\tUNKNOWN REASONING\tSUCCESSFUL REQUESTS\tSUCCESS UNKNOWN USAGE\tSUCCESS INPUT\tSUCCESS OUTPUT\tSUCCESS CACHE READ\tSUCCESS CACHE WRITE\tSUCCESS REASONING\tSUCCESS UNKNOWN INPUT\tSUCCESS UNKNOWN OUTPUT\tSUCCESS UNKNOWN CACHE READ\tSUCCESS UNKNOWN CACHE WRITE\tSUCCESS UNKNOWN REASONING"); err != nil {
+	if _, err := fmt.Fprintln(writer, "PROVIDER\tREQUESTED MODEL\tUPSTREAM MODEL\tINPUT\tOUTPUT\tCACHE READ\tCACHE WRITE\tREASONING\tUNKNOWN INPUT\tUNKNOWN OUTPUT\tUNKNOWN CACHE READ\tUNKNOWN CACHE WRITE\tUNKNOWN REASONING"); err != nil {
 		return err
 	}
 	for _, group := range result.Groups {
-		all := group.AllAttempts
-		outcomes := group.RequestOutcomes
-		successful := group.SuccessfulRequestUsage
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
 			group.Provider, group.RequestedModel, group.UpstreamModel,
-			all.Attempts, all.RetryAttempts, all.RetriedRequests,
-			outcomes.Requests, outcomes.Success, outcomes.Error, outcomes.Cancelled, outcomes.Unknown,
-			all.UnknownRecords,
-			all.Tokens.Input, all.Tokens.Output, all.Tokens.CacheRead, all.Tokens.CacheWrite, all.Tokens.Reasoning,
-			all.UnknownTokens.Input, all.UnknownTokens.Output, all.UnknownTokens.CacheRead,
-			all.UnknownTokens.CacheWrite, all.UnknownTokens.Reasoning,
-			successful.Requests, successful.UnknownRecords,
-			successful.Tokens.Input, successful.Tokens.Output, successful.Tokens.CacheRead,
-			successful.Tokens.CacheWrite, successful.Tokens.Reasoning,
-			successful.UnknownTokens.Input, successful.UnknownTokens.Output, successful.UnknownTokens.CacheRead,
-			successful.UnknownTokens.CacheWrite, successful.UnknownTokens.Reasoning,
+			group.Tokens.Input, group.Tokens.Output, group.Tokens.CacheRead,
+			group.Tokens.CacheWrite, group.Tokens.Reasoning,
+			group.UnknownTokens.Input, group.UnknownTokens.Output, group.UnknownTokens.CacheRead,
+			group.UnknownTokens.CacheWrite, group.UnknownTokens.Reasoning,
 		); err != nil {
 			return err
 		}

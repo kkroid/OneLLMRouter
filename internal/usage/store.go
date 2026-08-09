@@ -2,7 +2,6 @@ package usage
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -17,7 +16,6 @@ type Store struct {
 	baseDir string
 	logger  *slog.Logger
 	now     func() time.Time
-	written map[string]struct{}
 }
 
 // NewStore creates a usage store. An empty base directory uses
@@ -34,20 +32,13 @@ func NewStore(baseDir string, logger *slog.Logger, clocks ...func() time.Time) *
 		baseDir: baseDir,
 		logger:  logger,
 		now:     now,
-		written: make(map[string]struct{}),
 	}
 }
 
-// Write appends one record. A successfully written request attempt is ignored
-// if it is submitted again to the same Store.
+// Write appends one record. Collection call sites own attempt deduplication.
 func (s *Store) Write(record Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	key := fmt.Sprintf("%s\x00%d", record.RequestID, record.UpstreamAttempt)
-	if _, ok := s.written[key]; ok {
-		return nil
-	}
 
 	record.Time = s.now().UTC()
 	data, err := json.Marshal(record)
@@ -75,7 +66,6 @@ func (s *Store) Write(record Record) error {
 		return err
 	}
 
-	s.written[key] = struct{}{}
 	return nil
 }
 

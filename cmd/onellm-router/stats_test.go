@@ -44,23 +44,23 @@ func TestStatsCommandJSONAndTableUseSameAggregation(t *testing.T) {
 	if err := jsonCmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{`"attempts"`, `"retry_attempts"`, `"retried_requests"`, `"unknown_tokens"`, `"requests"`} {
+	for _, field := range []string{`"tokens"`, `"unknown_tokens"`} {
 		if !bytes.Contains(jsonOutput.Bytes(), []byte(field)) {
 			t.Fatalf("JSON missing %s: %s", field, jsonOutput.Bytes())
 		}
 	}
-	if bytes.Contains(jsonOutput.Bytes(), []byte(`"total"`)) {
-		t.Fatalf("JSON retained old request outcome field: %s", jsonOutput.Bytes())
+	for _, removed := range []string{`"all_attempts"`, `"request_outcomes"`, `"successful_request_usage"`, `"retry_attempts"`} {
+		if bytes.Contains(jsonOutput.Bytes(), []byte(removed)) {
+			t.Fatalf("JSON retained removed field %s: %s", removed, jsonOutput.Bytes())
+		}
 	}
 	var result usage.StatsResult
 	if err := json.Unmarshal(jsonOutput.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Groups) != 1 || result.Groups[0].AllAttempts.Tokens.Input != 12 ||
-		result.Groups[0].AllAttempts.UnknownTokens.CacheRead != 1 ||
-		result.Groups[0].RequestOutcomes.Requests != 1 ||
-		result.Groups[0].SuccessfulRequestUsage.Tokens.Output != 7 ||
-		result.Groups[0].SuccessfulRequestUsage.UnknownTokens.Reasoning != 1 {
+	if len(result.Groups) != 1 || result.Groups[0].Tokens.Input != 12 ||
+		result.Groups[0].Tokens.Output != 7 || result.Groups[0].UnknownTokens.CacheRead != 1 ||
+		result.Groups[0].UnknownTokens.Reasoning != 1 {
 		t.Fatalf("JSON result = %+v", result)
 	}
 
@@ -74,10 +74,7 @@ func TestStatsCommandJSONAndTableUseSameAggregation(t *testing.T) {
 	table := tableOutput.String()
 	for _, value := range []string{
 		"Period: day 2026-08-09 (UTC)", "openai/gpt-5", "gpt-5", "12", "7",
-		"ATTEMPTS", "RETRY ATTEMPTS", "RETRIED REQUESTS", "REQUESTS",
 		"UNKNOWN INPUT", "UNKNOWN OUTPUT", "UNKNOWN CACHE READ", "UNKNOWN CACHE WRITE", "UNKNOWN REASONING",
-		"SUCCESS UNKNOWN INPUT", "SUCCESS UNKNOWN OUTPUT", "SUCCESS UNKNOWN CACHE READ",
-		"SUCCESS UNKNOWN CACHE WRITE", "SUCCESS UNKNOWN REASONING",
 	} {
 		if !strings.Contains(table, value) {
 			t.Fatalf("table missing %q:\n%s", value, table)

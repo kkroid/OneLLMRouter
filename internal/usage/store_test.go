@@ -51,29 +51,6 @@ func TestStoreAppendsAndRollsOverByUTCDay(t *testing.T) {
 	}
 }
 
-func TestStoreIgnoresDuplicateAttempt(t *testing.T) {
-	dir := t.TempDir()
-	store := NewStore(dir, nil, func() time.Time {
-		return time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
-	})
-	record := testRecord("request-1", 2)
-
-	if err := store.Write(record); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Write(record); err != nil {
-		t.Fatal(err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "2026-08-09.jsonl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if lines := strings.Count(string(data), "\n"); lines != 1 {
-		t.Fatalf("line count = %d, want 1", lines)
-	}
-}
-
 func TestStoreLogsWriteFailureWithoutRecordContents(t *testing.T) {
 	root := t.TempDir()
 	blockedPath := filepath.Join(root, "not-a-directory")
