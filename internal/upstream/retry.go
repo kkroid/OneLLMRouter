@@ -27,6 +27,22 @@ const (
 
 type RequestFactory func(context.Context) (*http.Request, error)
 
+type attemptIdentityKey struct{}
+
+// AttemptIdentity identifies one upstream attempt for a client request.
+type AttemptIdentity struct {
+	RequestID       string
+	UpstreamAttempt int
+}
+
+// AttemptIdentityFromContext returns the identity of the current upstream
+// attempt when called from a request factory, response probe, or request
+// context.
+func AttemptIdentityFromContext(ctx context.Context) (AttemptIdentity, bool) {
+	identity, ok := ctx.Value(attemptIdentityKey{}).(AttemptIdentity)
+	return identity, ok
+}
+
 // ResponseProbe may inspect a successful response before Headers mode commits
 // it to the client. The probe owns any bytes it reads and must restore
 // response.Body before returning nil. A non-nil Failure causes the executor to
@@ -136,6 +152,10 @@ func (e *Executor) Do(
 		}
 
 		attemptContext, stopTimeout, release := e.startAttempt(ctx, started, options.PerAttemptTimeout)
+		attemptContext = context.WithValue(attemptContext, attemptIdentityKey{}, AttemptIdentity{
+			RequestID:       metadata.RequestID,
+			UpstreamAttempt: attempt,
+		})
 
 		request, err := factory(attemptContext)
 		if err != nil {

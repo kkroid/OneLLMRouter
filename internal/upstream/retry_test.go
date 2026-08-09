@@ -56,6 +56,43 @@ func TestRetryRebuildsRequestUntilSuccess(t *testing.T) {
 	}
 }
 
+func TestRetryExposesStableOneBasedAttemptIdentity(t *testing.T) {
+	executor, _ := newTestExecutor(retryPolicy())
+	var identities []AttemptIdentity
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		identity, ok := AttemptIdentityFromContext(request.Context())
+		if !ok {
+			t.Fatal("request context has no attempt identity")
+		}
+		if identity.UpstreamAttempt < 3 {
+			return testResponse(http.StatusBadGateway), nil
+		}
+		return testResponse(http.StatusOK), nil
+	})}
+
+	result, failure := executor.Do(context.Background(), client, Metadata{RequestID: "request-123"}, Options{Mode: Headers}, func(ctx context.Context) (*http.Request, error) {
+		identity, ok := AttemptIdentityFromContext(ctx)
+		if !ok {
+			t.Fatal("factory context has no attempt identity")
+		}
+		identities = append(identities, identity)
+		return http.NewRequestWithContext(ctx, http.MethodPost, "https://example.test/v1/messages", nil)
+	})
+	if failure != nil {
+		t.Fatalf("Do() failure = %+v", failure)
+	}
+	defer result.Response.Body.Close()
+
+	want := []AttemptIdentity{
+		{RequestID: "request-123", UpstreamAttempt: 1},
+		{RequestID: "request-123", UpstreamAttempt: 2},
+		{RequestID: "request-123", UpstreamAttempt: 3},
+	}
+	if !reflect.DeepEqual(identities, want) {
+		t.Fatalf("identities = %+v, want %+v", identities, want)
+	}
+}
+
 func TestRetryDisabledCallsOnceWithoutWaiting(t *testing.T) {
 	policy := retryPolicy()
 	policy.Enabled = false
