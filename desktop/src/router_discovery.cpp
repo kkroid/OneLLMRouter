@@ -1,4 +1,5 @@
 #include "router_discovery.h"
+#include "platform/platform.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -8,10 +9,6 @@
 #include <QNetworkRequest>
 #include <QTcpServer>
 #include <QUrl>
-
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#endif
 
 namespace {
 
@@ -153,11 +150,7 @@ bool healthMatchesConfig(const RouterHealth &health,
         QFileInfo(health.configPath).absoluteFilePath());
     const QString configPath = QDir::cleanPath(
         QFileInfo(config.configPath).absoluteFilePath());
-#ifdef Q_OS_WIN
-    return healthPath.compare(configPath, Qt::CaseInsensitive) == 0;
-#else
-    return healthPath == configPath;
-#endif
+    return Platform::pathsEqual(healthPath, configPath);
 }
 
 DiscoveryClassification classifyHealthProbe(ProbeTransport transport,
@@ -234,12 +227,7 @@ void RouterDiscovery::discover()
     m_configProcess.setProgram(m_coreExecutable);
     m_configProcess.setArguments(configInfoArguments(m_configPath));
     m_configProcess.setWorkingDirectory(QFileInfo(m_coreExecutable).absolutePath());
-#ifdef Q_OS_WIN
-    m_configProcess.setCreateProcessArgumentsModifier(
-        [](QProcess::CreateProcessArguments *arguments) {
-            arguments->flags |= CREATE_NO_WINDOW;
-        });
-#endif
+    Platform::configureChildProcess(m_configProcess);
     m_configProcess.start();
     m_configTimer.start(m_timeoutMs);
 }

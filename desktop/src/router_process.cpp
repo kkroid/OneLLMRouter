@@ -1,12 +1,8 @@
 #include "router_process.h"
+#include "platform/platform.h"
 
 #include <QCoreApplication>
-#include <QDir>
 #include <QFileInfo>
-
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#endif
 
 QStringList routerChildArguments(const QString &absoluteConfigPath)
 {
@@ -116,8 +112,7 @@ bool RouterProcess::startOwned(const QString &configPath)
     }
 
     if (m_coreExecutable.isEmpty()) {
-        m_coreExecutable = QDir(QCoreApplication::applicationDirPath())
-                               .filePath(QStringLiteral("onellm-router-core.exe"));
+        m_coreExecutable = Platform::coreExecutablePath();
     }
     m_configPath = QFileInfo(configPath).absoluteFilePath();
     QProcess *process = ensureProcess();
@@ -125,12 +120,7 @@ bool RouterProcess::startOwned(const QString &configPath)
     process->setArguments(routerChildArguments(m_configPath));
     process->setWorkingDirectory(QCoreApplication::applicationDirPath());
     process->setProcessChannelMode(QProcess::SeparateChannels);
-#ifdef Q_OS_WIN
-    process->setCreateProcessArgumentsModifier(
-        [](QProcess::CreateProcessArguments *arguments) {
-            arguments->flags |= CREATE_NO_WINDOW;
-        });
-#endif
+    Platform::configureChildProcess(*process);
     m_startPending = true;
     emit stateChanged(RouterState::Starting);
     process->start(QIODevice::ReadWrite);

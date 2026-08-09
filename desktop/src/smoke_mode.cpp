@@ -1,19 +1,11 @@
 #include "smoke_mode.h"
+#include "platform/platform.h"
 
 #include <QCoreApplication>
-#include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QDebug>
 #include <QSaveFile>
-
-namespace {
-QString corePath()
-{
-    return QDir(QCoreApplication::applicationDirPath())
-        .filePath("onellm-router-core.exe");
-}
-}
 
 QJsonObject buildSmokeResult(qint64 pid, int port)
 {
@@ -43,7 +35,7 @@ SmokeRunner::SmokeRunner(QString configPath, QString resultPath,
     : QObject(parent),
       m_configPath(QFileInfo(configPath).absoluteFilePath()),
       m_resultPath(QFileInfo(resultPath).absoluteFilePath()),
-      m_discovery(corePath(), m_configPath, 2000, this),
+      m_discovery(Platform::coreExecutablePath(), m_configPath, 2000, this),
       m_process(this)
 {
     m_startTimer.setSingleShot(true);

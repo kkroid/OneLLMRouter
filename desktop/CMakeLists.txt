@@ -13,6 +13,12 @@ if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
 endif()
 
+if(WIN32)
+    set(ONELLM_PLATFORM_SOURCE src/platform/platform_windows.cpp)
+else()
+    set(ONELLM_PLATFORM_SOURCE src/platform/platform_unix.cpp)
+endif()
+
 add_executable(onellm-router-tray WIN32
     src/main.cpp
     src/proxy_probe.cpp
@@ -27,6 +33,8 @@ add_executable(onellm-router-tray WIN32
     src/tray_application.cpp
     src/tray_application.h
     src/i18n.h
+    src/platform/platform.h
+    ${ONELLM_PLATFORM_SOURCE}
     assets/icons.qrc
 )
 target_link_libraries(onellm-router-tray PRIVATE Qt6::Widgets Qt6::Network)

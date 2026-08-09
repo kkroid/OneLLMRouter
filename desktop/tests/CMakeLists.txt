@@ -13,6 +13,8 @@ add_executable(router_discovery_test
     router_discovery_test.cpp
     ../src/router_discovery.cpp
     ../src/router_discovery.h
+    ../src/platform/platform.h
+    ../${ONELLM_PLATFORM_SOURCE}
 )
 target_include_directories(router_discovery_test PRIVATE ../src)
 target_link_libraries(router_discovery_test PRIVATE Qt6::Test Qt6::Network)
@@ -26,6 +28,8 @@ add_executable(router_process_test
     router_process_test.cpp
     ../src/router_process.cpp
     ../src/router_process.h
+    ../src/platform/platform.h
+    ../${ONELLM_PLATFORM_SOURCE}
 )
 target_include_directories(router_process_test PRIVATE ../src)
 target_link_libraries(router_process_test PRIVATE Qt6::Test Qt6::Network)
@@ -63,6 +67,7 @@ add_executable(tray_application_test
     ../src/router_discovery.cpp
     ../src/router_process.cpp
     ../src/tray_application.cpp
+    ../${ONELLM_PLATFORM_SOURCE}
     ../assets/icons.qrc
 )
 target_include_directories(tray_application_test PRIVATE ../src)
@@ -79,10 +84,23 @@ add_executable(smoke_mode_test
     ../src/smoke_mode.cpp
     ../src/router_discovery.cpp
     ../src/router_process.cpp
+    ../${ONELLM_PLATFORM_SOURCE}
 )
 target_include_directories(smoke_mode_test PRIVATE ../src)
 target_link_libraries(smoke_mode_test PRIVATE Qt6::Test Qt6::Network)
 add_test(NAME smoke_mode_test COMMAND smoke_mode_test)
 set_tests_properties(smoke_mode_test PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_executable(platform_test
+    platform_test.cpp
+    ../src/platform/platform.h
+    ../${ONELLM_PLATFORM_SOURCE}
+)
+target_include_directories(platform_test PRIVATE ../src)
+target_link_libraries(platform_test PRIVATE Qt6::Test)
+add_test(NAME platform_test COMMAND platform_test)
+set_tests_properties(platform_test PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )

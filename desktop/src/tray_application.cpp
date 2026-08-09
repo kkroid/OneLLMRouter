@@ -1,4 +1,5 @@
 #include "tray_application.h"
+#include "platform/platform.h"
 
 #include <QAction>
 #include <QCoreApplication>
@@ -7,22 +8,6 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <QUrl>
-
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#endif
-
-namespace {
-QString corePath()
-{
-    return QDir(QCoreApplication::applicationDirPath())
-        .filePath("onellm-router-core.exe");
-}
-QString registryPath()
-{
-    return "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-}
-}
 
 TrayActionPolicy trayActionPolicy(ProcessOwnership ownership, RouterState state)
 {
@@ -61,15 +46,14 @@ QString applicationRestartArguments(const QString &configPath)
 
 bool registerApplicationRestart(const QString &configPath)
 {
-#ifdef Q_OS_WIN
     const QString arguments = applicationRestartArguments(configPath);
-    return SUCCEEDED(::RegisterApplicationRestart(
-        reinterpret_cast<PCWSTR>(arguments.utf16()),
-        RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_REBOOT));
-#else
-    Q_UNUSED(configPath);
-    return true;
-#endif
+    QString error;
+    const bool registered =
+        Platform::registerApplicationRestart(arguments, &error);
+    if (!error.isEmpty()) {
+        qWarning().noquote() << error;
+    }
+    return registered;
 }
 
 QString autoStartValueName()
@@ -117,7 +101,7 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
     : QObject(parent),
       m_configPath(QFileInfo(configPath).absoluteFilePath()),
       m_strings(stringsForLocale(QLocale::system())),
-      m_discovery(corePath(), m_configPath, 2000, this),
+      m_discovery(Platform::coreExecutablePath(), m_configPath, 2000, this),
       m_process(this),
       m_proxyProbe(this)
 {
@@ -179,11 +163,14 @@ TrayApplication::TrayApplication(QString configPath, bool activateRuntime,
     m_pollTimer.setInterval(2000);
     connect(&m_pollTimer, &QTimer::timeout, this, &TrayApplication::discover);
     if (activateRuntime) {
-        QSettings settings(registryPath(), QSettings::NativeFormat);
-        migrateLegacyAutoStart(
-            settings,
+        QString error;
+        Platform::migrateLegacyAutoStart(
             autoStartCommand(QCoreApplication::applicationFilePath(),
-                             m_configPath));
+                             m_configPath),
+            &error);
+        if (!error.isEmpty()) {
+            qWarning().noquote() << error;
+        }
         m_trayIcon.show();
         m_pollTimer.start();
         QTimer::singleShot(0, this, &TrayApplication::discover);
@@ -235,6 +222,7 @@ void TrayApplication::rebuildMenu()
             [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(m_config.logDir)); });
     QAction *autoStart = m_menu.addAction(m_strings.autoStart);
     autoStart->setCheckable(true);
+    autoStart->setEnabled(Platform::autoStartSupported());
     autoStart->setChecked(autoStartEnabled());
     connect(autoStart, &QAction::toggled, this, &TrayApplication::setAutoStartEnabled);
     m_menu.addSeparator();
@@ -291,16 +279,18 @@ QString TrayApplication::stateText() const
 
 void TrayApplication::setAutoStartEnabled(bool enabled)
 {
-    QSettings settings(registryPath(), QSettings::NativeFormat);
-    configureAutoStart(
-        settings, enabled,
-        autoStartCommand(QCoreApplication::applicationFilePath(),
-                         m_configPath));
+    QString error;
+    Platform::setAutoStart(
+        enabled,
+        autoStartCommand(QCoreApplication::applicationFilePath(), m_configPath),
+        &error);
+    if (!error.isEmpty()) {
+        qWarning().noquote() << error;
+    }
 }
 
 bool TrayApplication::autoStartEnabled() const
 {
-    QSettings settings(registryPath(), QSettings::NativeFormat);
-    return settings.value(autoStartValueName()).toString() ==
-           autoStartCommand(QCoreApplication::applicationFilePath(), m_configPath);
+    return Platform::autoStartEnabled(
+        autoStartCommand(QCoreApplication::applicationFilePath(), m_configPath));
 }
