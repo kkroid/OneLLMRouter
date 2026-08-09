@@ -64,7 +64,7 @@ Claude Code CLI     OpenAI 兼容工具
 
 ### 1. 编译
 
-源码构建需要 Go 1.25+ 和 PowerShell 7。
+源码构建需要 Go 1.26+ 和 PowerShell 7。
 
 ```bash
 git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter

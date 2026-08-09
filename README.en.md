@@ -50,7 +50,7 @@ The translation layer uses a compact internal representation before emitting Ant
 
 ## Build
 
-The portable build requires Go 1.25+ and PowerShell 7:
+The portable build requires Go 1.26+ and PowerShell 7:
 
 ```powershell
 git clone https://github.com/kkroid/OneLLMRouter.git
