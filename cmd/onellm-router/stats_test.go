@@ -44,10 +44,13 @@ func TestStatsCommandJSONAndTableUseSameAggregation(t *testing.T) {
 	if err := jsonCmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{`"attempts"`, `"retry_attempts"`, `"retried_requests"`, `"unknown_tokens"`, `"total"`} {
+	for _, field := range []string{`"attempts"`, `"retry_attempts"`, `"retried_requests"`, `"unknown_tokens"`, `"requests"`} {
 		if !bytes.Contains(jsonOutput.Bytes(), []byte(field)) {
 			t.Fatalf("JSON missing %s: %s", field, jsonOutput.Bytes())
 		}
+	}
+	if bytes.Contains(jsonOutput.Bytes(), []byte(`"total"`)) {
+		t.Fatalf("JSON retained old request outcome field: %s", jsonOutput.Bytes())
 	}
 	var result usage.StatsResult
 	if err := json.Unmarshal(jsonOutput.Bytes(), &result); err != nil {
@@ -55,7 +58,7 @@ func TestStatsCommandJSONAndTableUseSameAggregation(t *testing.T) {
 	}
 	if len(result.Groups) != 1 || result.Groups[0].AllAttempts.Tokens.Input != 12 ||
 		result.Groups[0].AllAttempts.UnknownTokens.CacheRead != 1 ||
-		result.Groups[0].RequestOutcomes.Total != 1 ||
+		result.Groups[0].RequestOutcomes.Requests != 1 ||
 		result.Groups[0].SuccessfulRequestUsage.Tokens.Output != 7 ||
 		result.Groups[0].SuccessfulRequestUsage.UnknownTokens.Reasoning != 1 {
 		t.Fatalf("JSON result = %+v", result)

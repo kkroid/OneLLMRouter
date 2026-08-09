@@ -52,7 +52,7 @@ type AttemptStats struct {
 }
 
 type OutcomeCounts struct {
-	Total     int `json:"total"`
+	Requests  int `json:"requests"`
 	Success   int `json:"success"`
 	Error     int `json:"error"`
 	Cancelled int `json:"cancelled"`
@@ -142,7 +142,7 @@ func AggregateDir(baseDir string, selected Range) (StatsResult, error) {
 
 	groups := make(map[groupKey]*StatsGroup)
 	retriedRequests := make(map[groupKey]map[string]struct{})
-	records := make([]Record, 0)
+	allRecords := make([]Record, 0)
 	seen := make(map[attemptKey]struct{})
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
@@ -159,10 +159,10 @@ func AggregateDir(baseDir string, selected Range) (StatsResult, error) {
 				continue
 			}
 			seen[key] = struct{}{}
+			allRecords = append(allRecords, record)
 			if record.Time.Before(selected.Start) || !record.Time.Before(selected.End) {
 				continue
 			}
-			records = append(records, record)
 			group := getGroup(groups, record)
 			group.AllAttempts.Attempts++
 			if record.UpstreamAttempt > 1 {
@@ -178,13 +178,16 @@ func AggregateDir(baseDir string, selected Range) (StatsResult, error) {
 	}
 
 	finalRecords := make(map[string]Record)
-	for _, record := range records {
+	for _, record := range allRecords {
 		previous, exists := finalRecords[record.RequestID]
 		if !exists || record.UpstreamAttempt > previous.UpstreamAttempt {
 			finalRecords[record.RequestID] = record
 		}
 	}
 	for _, record := range finalRecords {
+		if record.Time.Before(selected.Start) || !record.Time.Before(selected.End) {
+			continue
+		}
 		group := getGroup(groups, record)
 		addOutcome(&group.RequestOutcomes, record.Status)
 		if record.Status == StatusSuccess {
@@ -255,7 +258,7 @@ func addToken(total *int64, unknown *int, value *int) {
 }
 
 func addOutcome(outcomes *OutcomeCounts, status Status) {
-	outcomes.Total++
+	outcomes.Requests++
 	switch status {
 	case StatusSuccess:
 		outcomes.Success++

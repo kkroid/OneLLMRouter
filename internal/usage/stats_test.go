@@ -94,7 +94,7 @@ func TestAggregateDirGroupsAttemptsAndSuccessfulRequests(t *testing.T) {
 	if first.AllAttempts.UnknownTokens != (TokenUnknownCounts{Input: 1, Output: 2, CacheRead: 3, CacheWrite: 4, Reasoning: 4}) {
 		t.Fatalf("provider-a unknown tokens = %+v", first.AllAttempts.UnknownTokens)
 	}
-	if first.RequestOutcomes != (OutcomeCounts{Total: 2, Success: 1, Unknown: 1}) {
+	if first.RequestOutcomes != (OutcomeCounts{Requests: 2, Success: 1, Unknown: 1}) {
 		t.Fatalf("provider-a outcomes = %+v", first.RequestOutcomes)
 	}
 	if first.SuccessfulRequestUsage.Requests != 1 || first.SuccessfulRequestUsage.Tokens.Input != 3 ||
@@ -105,7 +105,7 @@ func TestAggregateDirGroupsAttemptsAndSuccessfulRequests(t *testing.T) {
 	second := got.Groups[1]
 	if second.Provider != "provider-b" || second.AllAttempts.UnknownRecords != 1 ||
 		second.AllAttempts.UnknownTokens != (TokenUnknownCounts{Input: 1, Output: 1, CacheRead: 1, CacheWrite: 1, Reasoning: 1}) ||
-		second.RequestOutcomes.Total != 1 || second.RequestOutcomes.Cancelled != 1 || second.SuccessfulRequestUsage.Requests != 0 {
+		second.RequestOutcomes.Requests != 1 || second.RequestOutcomes.Cancelled != 1 || second.SuccessfulRequestUsage.Requests != 0 {
 		t.Fatalf("provider-b group = %+v", second)
 	}
 
@@ -115,6 +115,52 @@ func TestAggregateDirGroupsAttemptsAndSuccessfulRequests(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, again) {
 		t.Fatalf("second aggregation changed result:\nfirst:  %+v\nsecond: %+v", got, again)
+	}
+}
+
+func TestAggregateDirAssignsCrossMidnightOutcomeToFinalAttemptDay(t *testing.T) {
+	dir := t.TempDir()
+	source := SourceResponse
+	records := []Record{
+		statsRecord("cross-midnight", 1, StatusError, "provider", "provider/model", "model", time.Date(2026, 8, 9, 23, 59, 59, 0, time.UTC), &source, intPointer(2), nil),
+		statsRecord("cross-midnight", 2, StatusSuccess, "provider", "provider/model", "model", time.Date(2026, 8, 10, 0, 0, 1, 0, time.UTC), &source, intPointer(3), intPointer(4)),
+	}
+	writeUsageLines(t, filepath.Join(dir, "records.jsonl"), records, false)
+
+	earlierRange, err := ParseRange(PeriodDay, "2026-08-09", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlier, err := AggregateDir(dir, earlierRange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(earlier.Groups) != 1 {
+		t.Fatalf("earlier groups = %+v", earlier.Groups)
+	}
+	earlierGroup := earlier.Groups[0]
+	if earlierGroup.AllAttempts.Attempts != 1 || earlierGroup.AllAttempts.Tokens.Input != 2 ||
+		earlierGroup.RequestOutcomes != (OutcomeCounts{}) || earlierGroup.SuccessfulRequestUsage.Requests != 0 {
+		t.Fatalf("earlier group = %+v", earlierGroup)
+	}
+
+	laterRange, err := ParseRange(PeriodDay, "2026-08-10", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, err := AggregateDir(dir, laterRange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(later.Groups) != 1 {
+		t.Fatalf("later groups = %+v", later.Groups)
+	}
+	laterGroup := later.Groups[0]
+	if laterGroup.AllAttempts.Attempts != 1 || laterGroup.AllAttempts.RetryAttempts != 1 ||
+		laterGroup.AllAttempts.RetriedRequests != 1 || laterGroup.RequestOutcomes != (OutcomeCounts{Requests: 1, Success: 1}) ||
+		laterGroup.SuccessfulRequestUsage.Requests != 1 || laterGroup.SuccessfulRequestUsage.Tokens.Input != 3 ||
+		laterGroup.SuccessfulRequestUsage.Tokens.Output != 4 {
+		t.Fatalf("later group = %+v", laterGroup)
 	}
 }
 
@@ -138,7 +184,7 @@ func TestAggregateDirHonorsISOWeekYearRecordBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got.Groups) != 1 || got.Groups[0].AllAttempts.Attempts != 2 ||
-		got.Groups[0].AllAttempts.Tokens.Input != 3 || got.Groups[0].RequestOutcomes.Total != 2 {
+		got.Groups[0].AllAttempts.Tokens.Input != 3 || got.Groups[0].RequestOutcomes.Requests != 2 {
 		t.Fatalf("result = %+v", got)
 	}
 }
@@ -163,7 +209,7 @@ func TestAggregateDirHonorsMonthRecordBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got.Groups) != 1 || got.Groups[0].AllAttempts.Attempts != 2 ||
-		got.Groups[0].AllAttempts.Tokens.Input != 3 || got.Groups[0].RequestOutcomes.Total != 2 {
+		got.Groups[0].AllAttempts.Tokens.Input != 3 || got.Groups[0].RequestOutcomes.Requests != 2 {
 		t.Fatalf("result = %+v", got)
 	}
 }

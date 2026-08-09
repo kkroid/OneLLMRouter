@@ -75,7 +75,7 @@ func writeStatsTable(output io.Writer, result usage.StatsResult) error {
 		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
 			group.Provider, group.RequestedModel, group.UpstreamModel,
 			all.Attempts, all.RetryAttempts, all.RetriedRequests,
-			outcomes.Total, outcomes.Success, outcomes.Error, outcomes.Cancelled, outcomes.Unknown,
+			outcomes.Requests, outcomes.Success, outcomes.Error, outcomes.Cancelled, outcomes.Unknown,
 			all.UnknownRecords,
 			all.Tokens.Input, all.Tokens.Output, all.Tokens.CacheRead, all.Tokens.CacheWrite, all.Tokens.Reasoning,
 			all.UnknownTokens.Input, all.UnknownTokens.Output, all.UnknownTokens.CacheRead,
