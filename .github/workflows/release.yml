@@ -40,6 +40,55 @@ jobs:
           CGO_ENABLED: "0"
         run: go build ./cmd/onellm-router
 
+  qt-platforms:
+    strategy:
+      matrix:
+        include:
+          - os: windows-2022
+            host: windows
+            target: desktop
+            arch: win64_msvc2022_64
+          - os: ubuntu-24.04
+            host: linux
+            target: desktop
+            arch: linux_gcc_64
+          - os: macos-15
+            host: mac
+            target: desktop
+            arch: clang_64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Qt
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: "6.8.3"
+          host: ${{ matrix.host }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
+          cache: true
+
+      - name: Configure desktop on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake -S desktop -B desktop/build -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DBUILD_TESTING=ON
+
+      - name: Configure desktop on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake -S desktop -B desktop/build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DBUILD_TESTING=ON
+
+      - name: Build desktop and tests
+        run: cmake --build desktop/build --config Release
+
+      - name: Test desktop offscreen
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir desktop/build -C Release --output-on-failure
+
   windows-release:
     runs-on: windows-2022
     outputs:
@@ -167,7 +216,7 @@ jobs:
 
   publish-release:
     if: github.ref_type == 'tag'
-    needs: [windows-release, go-platforms]
+    needs: [windows-release, go-platforms, qt-platforms]
     runs-on: ubuntu-latest
     permissions:
       contents: write
