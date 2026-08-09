@@ -1,43 +1,22 @@
 ---
-description: 将开发任务分解为可验证的步骤，每步明确验证标准
+description: Break a OneLLMRouter change into scoped, verifiable tasks
 allowed-tools: Read(*), Grep(*), Glob(*), Bash(git:*)
-argument-hint: <任务描述>
+argument-hint: <task description>
 ---
 
-## 任务分解与计划
+## Planning Rules
 
-将 `$ARGUMENTS` 分解为可逐步执行、每步可验证的计划。
+Read `AGENTS.md`, the relevant README sections, current tests, and any linked design document. Do not assume
+the old `onellmd`, gRPC, proto, or panel architecture.
 
-### 计划格式
+For the requested change, produce:
 
-```
-## 任务：<一句话概括>
+1. Current behavior and the concrete success criterion.
+2. Design gate: whether the change needs a repository-backed design decision.
+3. Task steps with exact repository-relative write scopes.
+4. Interfaces, persisted data, compatibility, and security implications.
+5. Focused verification commands and expected evidence.
+6. Non-goals and unresolved choices.
 
-### 背景
-- 当前状态：
-- 成功标准：
-
-### 执行计划
-
-#### 步骤 1：<步骤名称>
-- **做什么**：<具体操作>
-- **涉及文件**：<预估涉及的文件（Go proto / cmd/onellmd / panel/ 等）>
-- **验证**：<如何证明步骤完成（编译通过？gRPC 调用返回正确？curl 测试通过？面板显示正常？）>
-- **风险**：<可能的阻塞点>
-
-#### 步骤 2：<步骤名称>
-...
-
-### 注意事项
-- 改动在哪一侧？（Go 后台 / QT 面板 / proto 接口 / 两边都改）
-- proto 接口变更是否向后兼容？
-- 是否需要更新 onellmd.yaml 配置格式或 .env.example？
-- 是否需要更新 CLAUDE.md 技术约定？
-```
-
-### 关键原则
-
-1. 每步必须有可验证的输出
-2. 不确定的地方标记出来，不要假装知道
-3. 涉及 proto 变更时，先改 proto → 生成代码 → 再改 Go/C++ 两侧
-4. 如果发现原计划有问题，立即中断并说明
+Keep the smallest plan that fully covers the requested behavior. Do not edit files or implement the plan
+unless the user asks for that separately.

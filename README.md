@@ -2,9 +2,15 @@
 
 [English](README.en.md) | 简体中文 | [更新日志](CHANGELOG.zh-CN.md)
 
-**个人 AI 模型路由网关** — 将可配置的 Anthropic、OpenAI Chat Completions 和 OpenAI Responses 供应商统一暴露为标准接口，供 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、Codex 等工具使用。
+**Claude Code 和 Codex 的本地多供应商入口** — 只需配置一次供应商，就能直接在熟悉的工具内切换模型，无需反复修改客户端配置。OneLLMRouter 将 Anthropic、OpenAI Chat Completions 和 OpenAI Responses 供应商统一暴露为本地标准接口。
 
 提供两种发布形式：无运行时依赖的 Go 便携版，以及带 Qt 系统托盘和安装程序的桌面版。
+
+## 核心体验
+
+1. 配置一次 API 供应商和模型。
+2. 让 Claude Code、Codex 或 OpenAI 兼容工具始终指向同一个本地入口。
+3. 在工具自己的模型列表中直接切换供应商，OneLLMRouter 在后台处理协议、模型名、代理和可控重试。
 
 ## 架构
 
@@ -65,7 +71,7 @@ git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter
 pwsh build.ps1
 ```
 
-便携版产物在 `dist/onellm-router-v1.4.1.exe`。
+便携版产物在 `dist/onellm-router-v1.4.2.exe`。
 
 构建桌面安装包还需要 Qt 6.8.3（MSVC 2022 x64）、CMake、MSVC 2022 和 Inno Setup 6：
 
@@ -74,7 +80,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-安装包输出到 `dist/OneLLMRouter-1.4.1-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
+安装包输出到 `dist/OneLLMRouter-1.4.2-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
 
 ### 2. 配置
 
@@ -144,7 +150,7 @@ model_slots:
 ### 3. 启动
 
 ```bash
-.\dist\onellm-router-v1.4.1.exe
+.\dist\onellm-router-v1.4.2.exe
 ```
 
 启动时会打印 Claude Code 的 `settings.json`，可直接用于配置客户端。
@@ -329,7 +335,7 @@ providers:
     models: ["deepseek-v4-pro[1m]", "deepseek-v4-flash[1m]"]
 ```
 
-`retry` 是全局上游重试策略，默认启用。一次模型请求最多调用上游 15 次，错误恢复预算最多 5 分钟，任意两次尝试间最多等待 30 秒。`status_codes` 严格控制需要重试的 HTTP 状态；默认重试 `408/409/425/429/500/502/503/504`，不包含 `403`。配置者可按上游实际行为增删状态码；显式设置为空列表 `[]` 时不重试任何 HTTP 状态。传输错误、超时和非流式响应体读取错误仍按统一策略重试。
+`retry` 是全局上游重试策略，默认启用。一次模型请求最多调用上游 15 次，错误恢复预算最多 5 分钟，任意两次尝试间最多等待 30 秒。`status_codes` 严格控制需要重试的 HTTP 状态；默认重试 `408/409/425/429/500/502/503/504`，不包含 `403`。配置者可按上游实际行为增删状态码；显式设置为空列表 `[]` 时不重试任何 HTTP 状态。传输错误、超时和非流式响应体读取错误仍按统一策略重试。Responses 流在尚未产生输出时如果收到 `server_is_overloaded`、`slow_down` 或明确的模型容量错误，会在内部按 `503` 交给同一策略判断；已经产生输出的流不会重放。配置不允许重试或重试耗尽时，客户端收到最后一次上游原始 `200 + SSE` 容量失败，而不是内部分类使用的 503。
 
 每个 provider 可设置 `proxy`：`true` 走代理，`false` 直连，不填则继承全局设置。需要跨境访问的供应商通常走代理，国内服务可按网络情况直连。
 
@@ -352,4 +358,4 @@ JSON 格式，按天滚动，保留 30 天，文件路径 `~/.onellm/logs/onellm
 {"time":"2026-07-31T10:30:00+08:00","level":"INFO","msg":"request","request_id":"a1b2c3d4","method":"POST","path":"/anthropic/v1/messages","status":200,"duration_ms":1234,"model":"ds/deepseek-v4-pro[1m]","provider":"ds","stream":true,"ttfb_ms":650,"upstream_attempts":3,"retry_elapsed_ms":1012,"last_upstream_status":502,"last_failure_kind":"http"}
 ```
 
-每次上游失败、重试后恢复、最终失败和请求取消都会使用同一个 `request_id` 写入结构化日志。符合当前重试配置但达到次数或时间上限时记录 `upstream retry exhausted`；不符合重试配置时记录 `upstream retry skipped`。错误摘要会限制长度并屏蔽 API key、Authorization 和 Bearer credential。
+每次上游失败、重试后恢复、最终失败和请求取消都会使用同一个 `request_id` 写入结构化日志。符合当前重试配置但达到次数或时间上限时记录 `upstream retry exhausted`；不符合重试配置时记录 `upstream retry skipped`。日志中的错误摘要会限制长度并屏蔽 API key、Authorization 和 Bearer credential。原生协议直通路由会向客户端返回最后一次完整的上游失败响应；传输失败、过大的错误体和协议翻译仍返回 OneLLMRouter 生成的错误。

@@ -2,12 +2,18 @@
 
 English | [简体中文](README.md) | [Changelog](CHANGELOG.md)
 
-OneLLMRouter is a personal AI model routing gateway. It exposes configurable Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses providers through stable local endpoints for tools such as Claude Code and Codex.
+OneLLMRouter is a local multi-provider entry point for Claude Code and Codex. Configure providers once, then switch models directly inside the tools you already use without repeatedly editing client configuration. It exposes Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses providers through stable local endpoints.
 
 Two distributions are available:
 
 - A portable Go executable with no runtime dependencies.
 - A Windows desktop package with a Qt system tray and per-user Setup installer.
+
+## Core experience
+
+1. Configure your API providers and models once.
+2. Point Claude Code, Codex, or an OpenAI-compatible tool at one stable local endpoint.
+3. Switch providers from the tool's own model list while OneLLMRouter handles protocol translation, model names, proxying, and controlled retries in the background.
 
 ## Architecture
 
@@ -52,7 +58,7 @@ Set-Location OneLLMRouter
 pwsh .\build.ps1
 ```
 
-The result is `dist/onellm-router-v1.4.1.exe`.
+The result is `dist/onellm-router-v1.4.2.exe`.
 
 Building the desktop Setup package also requires Qt 6.8.3 for MSVC 2022 x64, CMake, MSVC 2022, and Inno Setup 6:
 
@@ -61,7 +67,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-The installer is written to `dist/OneLLMRouter-1.4.1-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`.
+The installer is written to `dist/OneLLMRouter-1.4.2-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`.
 
 ## Configuration
 
@@ -134,7 +140,7 @@ Configured provider models take precedence over upstream discovery. When `models
 ## Run
 
 ```powershell
-.\dist\onellm-router-v1.4.1.exe
+.\dist\onellm-router-v1.4.2.exe
 ```
 
 The service prints the Claude Code environment block at startup. The main CLI commands are:
@@ -188,9 +194,9 @@ The local provider prefix is removed before an inference request is sent upstrea
 
 ## Retry Behavior
 
-The global retry policy applies only to model inference requests. HTTP statuses are matched strictly against `retry.status_codes`; the default list does not contain `403`. An explicit empty list disables HTTP-status retries while transport, timeout, and buffered response-body read failures remain retryable.
+The global retry policy applies only to model inference requests. HTTP statuses are matched strictly against `retry.status_codes`; the default list does not contain `403`. An explicit empty list disables HTTP-status retries while transport, timeout, and buffered response-body read failures remain retryable. Before a Responses stream has produced output, known `server_is_overloaded`, `slow_down`, or model-capacity SSE failures are classified internally as `503` and passed through the same policy. A stream is never replayed after output has started. If the policy skips the retry or retries are exhausted, the client receives the final original upstream `200 + SSE` capacity failure rather than the internal 503 classification.
 
-Retries stop at the first of these boundaries: success, `max_attempts`, `max_elapsed`, client cancellation, or service shutdown. Streaming requests may retry only before a successful upstream response header is accepted. Once a successful stream starts, OneLLMRouter never replays it because doing so could duplicate text or tool calls.
+Retries stop at the first of these boundaries: success, `max_attempts`, `max_elapsed`, client cancellation, or service shutdown. Streaming requests normally stop retrying when a successful upstream response header is accepted; the Responses capacity preflight is the narrow exception described above. Once output has started, OneLLMRouter never replays the stream because doing so could duplicate text or tool calls.
 
 Providers may charge for failed or ambiguous attempts. OneLLMRouter cannot guarantee provider-side idempotency.
 
@@ -206,7 +212,7 @@ Setup upgrades preserve configuration, API keys, logs, and generated catalogs. W
 
 Logs are JSON lines under `~/.onellm/logs`, rotate daily, and are retained for 30 days by default. Request records include a request ID, model, provider, status, duration, streaming timing, retry attempts, and the final upstream failure category.
 
-Upstream error summaries are bounded and redact configured API keys, Authorization values, Bearer credentials, and common API-key fields.
+Upstream error summaries in logs are bounded and redact configured API keys, Authorization values, Bearer credentials, and common API-key fields. Native protocol routes return the final complete upstream failure response to the client unchanged; transport failures, oversized error bodies, and protocol translation still use OneLLMRouter-generated errors.
 
 ## Project Layout
 
