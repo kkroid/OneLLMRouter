@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "platform/platform.h"
 
 #include <QComboBox>
 #include <QFormLayout>
@@ -32,8 +33,12 @@ QStringList reasoningLevels(const QString &text)
 
 } // namespace
 
-MainWindow::MainWindow(ConfigClient *client, bool readOnly, QWidget *parent)
-    : QMainWindow(parent), m_client(client), m_readOnly(readOnly)
+MainWindow::MainWindow(ConfigClient *client, bool readOnly, QWidget *parent,
+                       UsageClient *usageClient)
+    : QMainWindow(parent), m_client(client),
+      m_usageClient(usageClient ? usageClient
+                                : new UsageClient(Platform::coreExecutablePath(), this)),
+      m_readOnly(readOnly)
 {
     buildUi();
     load();
@@ -107,6 +112,10 @@ void MainWindow::buildUi()
     }
     modelsLayout->addLayout(reasoning);
     m_tabs->addTab(modelsPage, "Models");
+
+    auto *usagePage = new UsagePage(m_usageClient, m_tabs);
+    usagePage->setObjectName("usagePage");
+    m_tabs->addTab(usagePage, "Usage");
 
     layout->addWidget(m_tabs);
     m_status = new QLabel(central); m_status->setObjectName("statusLabel");

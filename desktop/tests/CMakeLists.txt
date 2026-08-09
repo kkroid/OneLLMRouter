@@ -81,6 +81,10 @@ add_executable(tray_application_test
     ../src/main_window.h
     ../src/config/config_client.cpp
     ../src/config/config_client.h
+    ../src/usage/usage_model.cpp
+    ../src/usage/usage_model.h
+    ../src/usage/usage_page.cpp
+    ../src/usage/usage_page.h
     ../src/proxy_probe.cpp
     ../src/router_discovery.cpp
     ../src/router_process.cpp
@@ -137,6 +141,12 @@ add_executable(main_window_test
     ../src/main_window.h
     ../src/config/config_client.cpp
     ../src/config/config_client.h
+    ../src/usage/usage_model.cpp
+    ../src/usage/usage_model.h
+    ../src/usage/usage_page.cpp
+    ../src/usage/usage_page.h
+    ../src/platform/platform.h
+    ../${ONELLM_PLATFORM_SOURCE}
 )
 target_include_directories(main_window_test PRIVATE ../src)
 target_link_libraries(main_window_test PRIVATE Qt6::Test Qt6::Widgets Qt6::Network)
@@ -144,6 +154,35 @@ add_dependencies(main_window_test onellm_test_core)
 add_test(NAME main_window_test COMMAND main_window_test)
 set_tests_properties(main_window_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;ONELLM_TEST_CORE=${ONELLM_TEST_CORE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_executable(usage_model_test
+    usage_model_test.cpp
+    ../src/usage/usage_model.cpp
+    ../src/usage/usage_model.h
+)
+target_include_directories(usage_model_test PRIVATE ../src)
+target_link_libraries(usage_model_test PRIVATE Qt6::Test Qt6::Gui)
+add_dependencies(usage_model_test onellm_test_core)
+add_test(NAME usage_model_test COMMAND usage_model_test)
+set_tests_properties(usage_model_test PROPERTIES
+    ENVIRONMENT "ONELLM_TEST_CORE=${ONELLM_TEST_CORE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_executable(usage_page_test
+    usage_page_test.cpp
+    ../src/usage/usage_model.cpp
+    ../src/usage/usage_model.h
+    ../src/usage/usage_page.cpp
+    ../src/usage/usage_page.h
+)
+target_include_directories(usage_page_test PRIVATE ../src)
+target_link_libraries(usage_page_test PRIVATE Qt6::Test Qt6::Widgets)
+add_test(NAME usage_page_test COMMAND usage_page_test)
+set_tests_properties(usage_page_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 target_include_directories(platform_test PRIVATE ../src)

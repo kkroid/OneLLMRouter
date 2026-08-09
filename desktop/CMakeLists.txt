@@ -36,6 +36,10 @@ add_executable(onellm-router-tray WIN32
     src/smoke_mode.h
     src/tray_application.cpp
     src/tray_application.h
+    src/usage/usage_model.cpp
+    src/usage/usage_model.h
+    src/usage/usage_page.cpp
+    src/usage/usage_page.h
     src/i18n.h
     src/platform/platform.h
     ${ONELLM_PLATFORM_SOURCE}

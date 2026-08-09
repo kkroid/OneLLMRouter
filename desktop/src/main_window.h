@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config/config_client.h"
+#include "usage/usage_page.h"
 
 #include <QMainWindow>
 
@@ -16,7 +17,8 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 public:
     explicit MainWindow(ConfigClient *client, bool readOnly = false,
-                        QWidget *parent = nullptr);
+                        QWidget *parent = nullptr,
+                        UsageClient *usageClient = nullptr);
     void setReadOnly(bool readOnly);
 
 private slots:
@@ -39,6 +41,7 @@ private:
     QMap<int, QString> pendingKeys() const;
 
     ConfigClient *m_client;
+    UsageClient *m_usageClient;
     ConfigSnapshot m_snapshot;
     bool m_readOnly = false;
     QTabWidget *m_tabs;
