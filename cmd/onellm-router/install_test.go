@@ -1,3 +1,5 @@
+//go:build windows
+
 package main
 
 import (
@@ -5,8 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"golang.org/x/sys/windows/registry"
 
 	"github.com/kkroid/onellm-router/internal/config"
 )
@@ -20,7 +20,7 @@ type fakeInstallRegistry struct {
 
 func (fake *fakeInstallRegistry) GetStringValue(string) (string, uint32, error) {
 	if !fake.exists {
-		return "", 0, registry.ErrNotExist
+		return "", 0, errInstallValueNotExist
 	}
 	return fake.value, 0, nil
 }

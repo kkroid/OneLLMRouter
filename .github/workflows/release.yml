@@ -16,6 +16,30 @@ permissions:
   contents: read
 
 jobs:
+  go-platforms:
+    strategy:
+      matrix:
+        os: [windows-2022, ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Verify Go command package
+        run: go test -count=1 ./cmd/onellm-router
+
+      - name: Build Go command package
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./cmd/onellm-router
+
   windows-release:
     runs-on: windows-2022
     outputs:
