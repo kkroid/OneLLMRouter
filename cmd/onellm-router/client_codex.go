@@ -61,16 +61,19 @@ func newCodexOperationCmd(operation string) *cobra.Command {
 	if operation == "preview" {
 		cmd.Flags().StringVar(&options.model, "model", "", "configured provider/model")
 	}
+	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return writeCodexFailure(cmd, operation, emptyCodexResult(), "invalid_arguments", "command contains an unknown or malformed flag", nil)
+	})
 	return cmd
 }
 
 func runCodexOperation(cmd *cobra.Command, operation string, options *codexCommandOptions, args []string) error {
-	paths, pathErr := resolveCodexPaths(options)
-	result := codexconfig.Inspect(paths)
 	if !options.asJSON || len(args) != 0 || (operation == "preview" && options.model == "") {
-		return writeCodexFailure(cmd, operation, result, "invalid_arguments", "command requires --json, valid flags, and no positional arguments", nil)
+		return writeCodexFailure(cmd, operation, emptyCodexResult(), "invalid_arguments", "command requires --json, valid flags, and no positional arguments", nil)
 	}
 
+	paths, pathErr := resolveCodexPaths(options)
+	result := emptyCodexResult()
 	selectedConfigPath, err := filepath.Abs(configPath())
 	if err != nil {
 		return writeCodexFailure(cmd, operation, result, "router_config_error", "could not resolve Router configuration", nil)
@@ -113,6 +116,12 @@ func runCodexOperation(cmd *cobra.Command, operation string, options *codexComma
 		SchemaVersion: 1, Client: "codex", Operation: operation, OK: true,
 		Errors: []clientError{}, Result: result,
 	})
+}
+
+func emptyCodexResult() codexconfig.Result {
+	return codexconfig.Result{
+		SourceProviders: []string{}, SourceTag: codexconfig.SourceTag, WrittenPaths: []string{},
+	}
 }
 
 func resolveCodexPaths(options *codexCommandOptions) (codexconfig.Options, error) {

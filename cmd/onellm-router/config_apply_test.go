@@ -27,7 +27,8 @@ func TestConfigApplyPreservesCommentsUnknownFieldsAndOldKey(t *testing.T) {
 	snapshot := config.NewSnapshot(existing)
 	snapshot.Providers[0].BaseURL = "https://changed.invalid"
 	snapshot.ModelSlots.Default = "alpha/model"
-	snapshot.Codex.OverwriteCatalog = true
+	overwriteCatalog := true
+	snapshot.Codex.OverwriteCatalog = &overwriteCatalog
 	input, err := json.Marshal(snapshot)
 	if err != nil {
 		t.Fatal(err)

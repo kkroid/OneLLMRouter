@@ -109,7 +109,7 @@ type Snapshot struct {
 }
 
 type SnapshotCodex struct {
-	OverwriteCatalog bool                        `json:"overwrite_catalog" yaml:"overwrite_catalog"`
+	OverwriteCatalog *bool                       `json:"overwrite_catalog" yaml:"overwrite_catalog"`
 	Models           map[string]CodexModelConfig `json:"models" yaml:"models"`
 }
 
@@ -141,7 +141,7 @@ func NewSnapshot(cfg *Config) Snapshot {
 	}
 	return Snapshot{
 		Providers:  providers,
-		Codex:      SnapshotCodex{OverwriteCatalog: cfg.Codex.OverwriteCatalog, Models: cfg.Codex.Models},
+		Codex:      SnapshotCodex{OverwriteCatalog: boolPointer(cfg.Codex.OverwriteCatalog), Models: cfg.Codex.Models},
 		ModelSlots: cfg.ModelSlots,
 	}
 }
@@ -164,9 +164,13 @@ func (s Snapshot) Resolve(existing *Config) (*Config, []FieldError) {
 	for _, provider := range existing.Providers {
 		keys[provider.Prefix] = provider.APIKey
 	}
+	overwriteCatalog := existing.Codex.OverwriteCatalog
+	if s.Codex.OverwriteCatalog != nil {
+		overwriteCatalog = *s.Codex.OverwriteCatalog
+	}
 	resolved := &Config{
 		Server: existing.Server, Log: existing.Log, Proxy: existing.Proxy, Retry: existing.Retry,
-		Codex:      CodexConfig{OverwriteCatalog: s.Codex.OverwriteCatalog, Models: s.Codex.Models},
+		Codex:      CodexConfig{OverwriteCatalog: overwriteCatalog, Models: s.Codex.Models},
 		ModelSlots: s.ModelSlots, Providers: make([]ProviderConfig, len(s.Providers)),
 	}
 	var errors []FieldError
@@ -355,7 +359,7 @@ func RenderUpdate(original []byte, proposed *Config) ([]byte, error) {
 		ModelSlots ModelSlotsConfig `yaml:"model_slots"`
 	}{
 		Providers:  proposed.Providers,
-		Codex:      SnapshotCodex{OverwriteCatalog: proposed.Codex.OverwriteCatalog, Models: proposed.Codex.Models},
+		Codex:      SnapshotCodex{OverwriteCatalog: boolPointer(proposed.Codex.OverwriteCatalog), Models: proposed.Codex.Models},
 		ModelSlots: proposed.ModelSlots,
 	}
 	proposedData, err := yaml.Marshal(managed)
@@ -384,6 +388,10 @@ func RenderUpdate(original []byte, proposed *Config) ([]byte, error) {
 		return nil, fmt.Errorf("encode merged YAML: %w", err)
 	}
 	return output.Bytes(), nil
+}
+
+func boolPointer(value bool) *bool {
+	return &value
 }
 
 func Apply(path string, proposed *Config) error {

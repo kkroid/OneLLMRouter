@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,6 +162,69 @@ func TestCodexCommandFailureIsSecretSafeJSON(t *testing.T) {
 	}
 	if commandErr == nil || bytes.Contains(encoded, []byte(secret)) {
 		t.Fatalf("failure leaked secret or succeeded: %s, %v", encoded, commandErr)
+	}
+}
+
+func TestCodexUnknownFlagReturnsOneJSONEnvelopeWithoutCobraText(t *testing.T) {
+	var output bytes.Buffer
+	var errorOutput bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"client", "codex", "status", "--json", "--unknown-flag"})
+	cmd.SetOut(&output)
+	cmd.SetErr(&errorOutput)
+
+	commandErr := cmd.Execute()
+	if commandErr == nil {
+		t.Fatal("unknown flag succeeded")
+	}
+	var envelope clientEnvelope
+	decoder := json.NewDecoder(&output)
+	if err := decoder.Decode(&envelope); err != nil {
+		t.Fatalf("decode output %q: %v", output.Bytes(), err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		t.Fatalf("output contained more than one JSON object: %q", output.Bytes())
+	}
+	if envelope.OK || len(envelope.Errors) != 1 || envelope.Errors[0].Code != "invalid_arguments" {
+		t.Fatalf("unexpected envelope: %+v", envelope)
+	}
+	if errorOutput.Len() != 0 || bytes.Contains(output.Bytes(), []byte("Usage:")) || bytes.Contains(output.Bytes(), []byte("unknown flag")) {
+		t.Fatalf("Cobra text escaped machine envelope: stdout=%q stderr=%q", output.Bytes(), errorOutput.Bytes())
+	}
+}
+
+func TestCodexInvalidShapeDoesNotInspectSelectedFiles(t *testing.T) {
+	directory := t.TempDir()
+	selectedConfig := filepath.Join(directory, "selected-config")
+	selectedOneLLM := filepath.Join(directory, "selected-onellm")
+	selectedCodex := filepath.Join(directory, "selected-codex")
+	for _, path := range []string{selectedConfig, selectedOneLLM, selectedCodex} {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var output bytes.Buffer
+	cmd := newCodexOperationCmd("status")
+	cmd.SetArgs([]string{
+		"--json",
+		"--codex-config", selectedConfig,
+		"--onellm-catalog", selectedOneLLM,
+		"--codex-catalog", selectedCodex,
+		"unexpected-position",
+	})
+	cmd.SetOut(&output)
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("invalid invocation succeeded")
+	}
+	var envelope clientEnvelope
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode output %q: %v", output.Bytes(), err)
+	}
+	if envelope.Result.ConfigExists || envelope.Result.OneLLMCatalogExists || envelope.Result.CodexCatalogExists ||
+		envelope.Result.ConfigParseState != "" || envelope.Result.CatalogSyncState != "" {
+		t.Fatalf("invalid invocation inspected selected paths: %+v", envelope.Result)
 	}
 }
 

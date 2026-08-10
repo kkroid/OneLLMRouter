@@ -48,20 +48,34 @@ func TestSnapshotResolvePreservesKeyByPrefix(t *testing.T) {
 }
 
 func TestSnapshotAppliesOnlyCodexOverwriteCatalogAndModels(t *testing.T) {
-	existing := DefaultConfig()
-	existing.Providers = []ProviderConfig{{Prefix: "alpha", BaseURL: "https://example.invalid", APIKey: "secret"}}
-	snapshot := NewSnapshot(existing)
-	snapshot.Codex.OverwriteCatalog = false
+	for _, test := range []struct {
+		name     string
+		existing bool
+		proposed *bool
+		want     bool
+	}{
+		{name: "omitted preserves true", existing: true, proposed: nil, want: true},
+		{name: "explicit true applies", existing: false, proposed: boolPointer(true), want: true},
+		{name: "explicit false applies", existing: true, proposed: boolPointer(false), want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			existing := DefaultConfig()
+			existing.Codex.OverwriteCatalog = test.existing
+			existing.Providers = []ProviderConfig{{Prefix: "alpha", BaseURL: "https://example.invalid", APIKey: "secret"}}
+			snapshot := NewSnapshot(existing)
+			snapshot.Codex.OverwriteCatalog = test.proposed
 
-	resolved, errors := snapshot.Resolve(existing)
-	if len(errors) != 0 {
-		t.Fatalf("Resolve() errors = %+v", errors)
-	}
-	if resolved.Codex.OverwriteCatalog {
-		t.Fatal("Resolve() ignored editable codex.overwrite_catalog")
-	}
-	if !reflect.DeepEqual(resolved.Server, existing.Server) || !reflect.DeepEqual(resolved.Retry, existing.Retry) {
-		t.Fatal("Resolve() changed a closed configuration section")
+			resolved, errors := snapshot.Resolve(existing)
+			if len(errors) != 0 {
+				t.Fatalf("Resolve() errors = %+v", errors)
+			}
+			if resolved.Codex.OverwriteCatalog != test.want {
+				t.Fatalf("overwrite_catalog = %v, want %v", resolved.Codex.OverwriteCatalog, test.want)
+			}
+			if !reflect.DeepEqual(resolved.Server, existing.Server) || !reflect.DeepEqual(resolved.Retry, existing.Retry) {
+				t.Fatal("Resolve() changed a closed configuration section")
+			}
+		})
 	}
 }
 

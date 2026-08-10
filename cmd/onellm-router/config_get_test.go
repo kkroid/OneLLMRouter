@@ -31,7 +31,7 @@ func TestConfigGetReturnsOnlyEditableSecretSafeSnapshot(t *testing.T) {
 	if len(snapshot.Providers) != 1 || !snapshot.Providers[0].APIKeySet || snapshot.Codex.Models == nil {
 		t.Fatalf("incomplete snapshot: %+v", snapshot)
 	}
-	if snapshot.Codex.OverwriteCatalog {
+	if snapshot.Codex.OverwriteCatalog == nil || *snapshot.Codex.OverwriteCatalog {
 		t.Fatal("snapshot lost explicit codex.overwrite_catalog false")
 	}
 	for _, forbidden := range []string{`"server"`, `"log"`, `"retry"`, `"proxy_socks5"`} {
