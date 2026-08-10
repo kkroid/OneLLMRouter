@@ -54,7 +54,9 @@ func configPath() string {
 func main() {
 	rootCmd := newRootCmd()
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		if !errors.Is(err, errMachineOutput) {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		os.Exit(1)
 	}
 }
@@ -82,6 +84,7 @@ Anthropic and OpenAI API endpoints.`,
 	rootCmd.AddCommand(configValidateCmd())
 	rootCmd.AddCommand(configApplyCmd())
 	rootCmd.AddCommand(statsCmd())
+	rootCmd.AddCommand(clientCmd())
 	rootCmd.AddCommand(&cobra.Command{
 		Use: "version", Short: "Print version",
 		Run: func(cmd *cobra.Command, args []string) { fmt.Println(version) },
