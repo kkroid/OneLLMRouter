@@ -13,6 +13,7 @@ class ClientsPageTest : public QObject
 private slots:
     void showsConfiguredModelsAndKeyState();
     void externalCoreDisablesMutations();
+    void previewAvailabilityTracksConfiguration();
 };
 
 static ConfigSnapshot snapshot()
@@ -61,6 +62,28 @@ void ClientsPageTest::externalCoreDisablesMutations()
     QVERIFY(!page.findChild<QPushButton *>("codexCatalogApply")->isEnabled());
     QVERIFY(page.findChild<QPushButton *>("claudeCheck")->isEnabled());
     QVERIFY(page.findChild<QPushButton *>("codexCheck")->isEnabled());
+}
+
+void ClientsPageTest::previewAvailabilityTracksConfiguration()
+{
+    ConfigClient client("missing-core", "missing.yaml");
+    ClientsPage page(&client);
+    auto *preview = page.findChild<QPushButton *>("codexPreview");
+    QVERIFY(preview);
+
+    page.setConfiguration(snapshot());
+    QVERIFY(preview->isEnabled());
+    page.setConfiguration(ConfigSnapshot{});
+    QVERIFY(!preview->isEnabled());
+    page.setConfiguration(snapshot());
+    QVERIFY(preview->isEnabled());
+
+    page.setReadOnly(true);
+    QVERIFY(preview->isEnabled());
+    page.setConfiguration(ConfigSnapshot{});
+    QVERIFY(!preview->isEnabled());
+    page.setConfiguration(snapshot());
+    QVERIFY(preview->isEnabled());
 }
 
 QTEST_MAIN(ClientsPageTest)

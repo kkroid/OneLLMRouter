@@ -94,7 +94,8 @@ ClientsPage::ClientsPage(ConfigClient *client, QWidget *parent)
     layout->addStretch();
 
     connect(claudeCheck, &QPushButton::clicked, this, &ClientsPage::refreshClaude);
-    connect(m_claudeApply, &QPushButton::clicked, this, &ClientsPage::applyClaude);
+    connect(m_claudeApply, &QPushButton::clicked, this,
+            &ClientsPage::claudeApplyRequested);
     connect(m_claudeRestore, &QPushButton::clicked, this, &ClientsPage::restoreClaude);
     connect(codexCheck, &QPushButton::clicked, this, &ClientsPage::refreshCodex);
     connect(m_codexPreview, &QPushButton::clicked, this, &ClientsPage::previewCodex);
@@ -133,6 +134,7 @@ void ClientsPage::setConfiguration(const ConfigSnapshot &snapshot)
                               .arg(configuredKeys).arg(snapshot.providers.size()));
     m_codexModel->clear();
     m_codexModel->addItems(responsesModels);
+    updatePreviewAvailability();
 }
 
 void ClientsPage::setReadOnly(bool readOnly)
@@ -141,6 +143,11 @@ void ClientsPage::setReadOnly(bool readOnly)
     m_claudeApply->setEnabled(!readOnly);
     m_claudeRestore->setEnabled(!readOnly);
     m_codexApply->setEnabled(!readOnly);
+    updatePreviewAvailability();
+}
+
+void ClientsPage::updatePreviewAvailability()
+{
     m_codexPreview->setEnabled(!m_codexModel->currentText().isEmpty());
 }
 
@@ -150,7 +157,6 @@ QString ClientsPage::display(const QString &value)
 }
 
 void ClientsPage::refreshClaude() { showClaude(m_client->claudeStatus()); }
-void ClientsPage::applyClaude() { showClaude(m_client->claudeApply()); }
 void ClientsPage::restoreClaude() { showClaude(m_client->claudeRestore()); }
 void ClientsPage::refreshCodex() { showCodex(m_client->codexStatus()); }
 void ClientsPage::previewCodex() { showCodex(m_client->codexPreview(m_codexModel->currentText())); }
@@ -165,6 +171,21 @@ void ClientsPage::showClaude(const ClientCommandResult &result)
                                     state.backupExists ? "present" : "absent")
                                .arg(state.configuredModelCount));
     m_claudeError->setText(result.succeeded ? QString() : result.error);
+}
+
+void ClientsPage::showClaudeResult(const ClientCommandResult &result)
+{
+    showClaude(result);
+}
+
+void ClientsPage::showConfigurationError(const ConfigResult &result)
+{
+    if (!result.fieldErrors.isEmpty()) {
+        const ConfigFieldError &error = result.fieldErrors.first();
+        m_claudeError->setText(error.field + ": " + error.message);
+    } else {
+        m_claudeError->setText(result.error);
+    }
 }
 
 void ClientsPage::showCodex(const ClientCommandResult &result)

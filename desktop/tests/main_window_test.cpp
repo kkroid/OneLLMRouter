@@ -1,4 +1,6 @@
 #include <QtTest>
+#include <QComboBox>
+#include <QDir>
 #include <QLabel>
 #include <QFile>
 #include <QLineEdit>
@@ -22,7 +24,38 @@ private slots:
     void noOpSavePreservesReasoningModels();
     void userReasoningEditsTrimAndClear();
     void existingKeyMustBeReenteredForDiscovery();
+    void claudeApplySavesSelectedSlotFirst();
+    void claudeApplyStopsOnValidationFailure();
 };
+
+class TemporaryHome
+{
+public:
+    explicit TemporaryHome(const QString &path)
+        : m_home(qgetenv("HOME")), m_profile(qgetenv("USERPROFILE"))
+    {
+        qputenv("HOME", path.toUtf8());
+        qputenv("USERPROFILE", path.toUtf8());
+    }
+    ~TemporaryHome()
+    {
+        qputenv("HOME", m_home);
+        qputenv("USERPROFILE", m_profile);
+    }
+private:
+    QByteArray m_home;
+    QByteArray m_profile;
+};
+
+static QByteArray clientTestConfig()
+{
+    return "server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
+           "  - name: Alpha\n    prefix: alpha\n    base_url: https://alpha.invalid\n"
+           "    api_key: fake-key\n    models: [old-model, new-model]\n"
+           "codex:\n  models: {}\nmodel_slots:\n  default: alpha/old-model\n"
+           "  opus: alpha/old-model\n  sonnet: alpha/old-model\n"
+           "  haiku: alpha/old-model\n  fable: alpha/old-model\n";
+}
 
 void MainWindowTest::externalCoreIsReadOnly()
 {
@@ -213,6 +246,68 @@ void MainWindowTest::existingKeyMustBeReenteredForDiscovery()
     const QString message = window.findChild<QLabel *>("statusLabel")->text();
     QVERIFY(message.contains("Re-enter"));
     QVERIFY(!message.contains("existing-secret"));
+}
+
+void MainWindowTest::claudeApplySavesSelectedSlotFirst()
+{
+    const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    TemporaryHome home(directory.path());
+    const QString path = directory.filePath("router.yaml");
+    QFile config(path);
+    QVERIFY(config.open(QIODevice::WriteOnly));
+    config.write(clientTestConfig());
+    config.close();
+
+    ConfigClient client(core, path);
+    MainWindow window(&client);
+    auto *slot = window.findChild<QComboBox *>("slot_default");
+    auto *apply = window.findChild<QPushButton *>("claudeApply");
+    QVERIFY(slot && apply);
+    slot->setCurrentText("alpha/new-model");
+    QTest::mouseClick(apply, Qt::LeftButton);
+
+    ConfigSnapshot saved;
+    QVERIFY(client.load(&saved).succeeded);
+    QCOMPARE(saved.modelSlots.value("default"), QString("alpha/new-model"));
+    QFile settings(directory.filePath(".claude/settings.json"));
+    QVERIFY(settings.open(QIODevice::ReadOnly));
+    const QByteArray generated = settings.readAll();
+    QVERIFY(generated.contains("\"ANTHROPIC_MODEL\": \"alpha/new-model\""));
+    QVERIFY(!generated.contains("\"ANTHROPIC_MODEL\": \"alpha/old-model\""));
+}
+
+void MainWindowTest::claudeApplyStopsOnValidationFailure()
+{
+    const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    TemporaryHome home(directory.path());
+    const QString path = directory.filePath("router.yaml");
+    QFile config(path);
+    QVERIFY(config.open(QIODevice::WriteOnly));
+    config.write(clientTestConfig());
+    config.close();
+    QDir().mkpath(directory.filePath(".claude"));
+    const QString settingsPath = directory.filePath(".claude/settings.json");
+    QFile settings(settingsPath);
+    QVERIFY(settings.open(QIODevice::WriteOnly));
+    const QByteArray original = "{\"theme\":\"keep\"}\n";
+    settings.write(original);
+    settings.close();
+
+    ConfigClient client(core, path);
+    MainWindow window(&client);
+    window.findChild<QLineEdit *>("anthropicBaseUrl")->clear();
+    window.findChild<QLineEdit *>("openAIBaseUrl")->clear();
+    window.findChild<QLineEdit *>("responsesBaseUrl")->clear();
+    QTest::mouseClick(window.findChild<QPushButton *>("claudeApply"), Qt::LeftButton);
+
+    QVERIFY(settings.open(QIODevice::ReadOnly));
+    QCOMPARE(settings.readAll(), original);
+    const QString error = window.findChild<QLabel *>("claudeError")->text();
+    QVERIFY(error.contains("providers[0]"));
 }
 
 QTEST_MAIN(MainWindowTest)

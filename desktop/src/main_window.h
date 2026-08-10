@@ -31,6 +31,7 @@ private slots:
     void removeModel();
     void discoverModels();
     void save();
+    void applyClaude();
 
 private:
     void buildUi();
@@ -39,6 +40,8 @@ private:
     void refreshModels();
     void refreshReasoning();
     void showResult(const ConfigResult &result);
+    ConfigResult saveConfiguration();
+    void finishSuccessfulSave();
     QMap<int, QString> pendingKeys() const;
 
     ConfigClient *m_client;

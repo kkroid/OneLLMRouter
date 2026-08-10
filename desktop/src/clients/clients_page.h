@@ -17,17 +17,20 @@ public:
     explicit ClientsPage(ConfigClient *client, QWidget *parent = nullptr);
     void setConfiguration(const ConfigSnapshot &snapshot);
     void setReadOnly(bool readOnly);
+    void showClaudeResult(const ClientCommandResult &result);
+    void showConfigurationError(const ConfigResult &result);
 
 signals:
     void modelSlotChanged(const QString &slot, const QString &model);
+    void claudeApplyRequested();
 
 private:
     void refreshClaude();
-    void applyClaude();
     void restoreClaude();
     void refreshCodex();
     void previewCodex();
     void applyCodexCatalog();
+    void updatePreviewAvailability();
     void showClaude(const ClientCommandResult &result);
     void showCodex(const ClientCommandResult &result);
     static QString display(const QString &value);

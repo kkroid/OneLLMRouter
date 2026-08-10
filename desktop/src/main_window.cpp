@@ -151,6 +151,8 @@ void MainWindow::buildUi()
             [this](const QString &slot, const QString &value) {
                 m_snapshot.modelSlots.insert(slot, value);
             });
+    connect(m_clientsPage, &ClientsPage::claudeApplyRequested,
+            this, &MainWindow::applyClaude);
     connect(m_save, &QPushButton::clicked, this, &MainWindow::save);
     connect(m_client, &ConfigClient::modelsDiscovered, this,
             [this](const QString &providerPrefix, const QStringList &models) {
@@ -311,22 +313,42 @@ QMap<int, QString> MainWindow::pendingKeys() const
 
 void MainWindow::save()
 {
+    const ConfigResult result = saveConfiguration();
+    showResult(result);
+    if (result.succeeded) finishSuccessfulSave();
+}
+
+ConfigResult MainWindow::saveConfiguration()
+{
     saveProvider();
     const QMap<int, QString> keys = pendingKeys();
     ConfigResult result = m_client->validate(m_snapshot, keys);
     if (result.succeeded) result = m_client->apply(m_snapshot, keys);
-    showResult(result);
-    if (result.succeeded) {
-        m_apiKeys.clear();
-        m_apiKey->clear();
+    return result;
+}
+
+void MainWindow::finishSuccessfulSave()
+{
+    m_apiKeys.clear();
+    m_apiKey->clear();
+    m_status->setText("Configuration saved. Restart Core to apply changes.");
+    ConfigSnapshot reloaded;
+    if (m_client->load(&reloaded).succeeded) {
+        m_snapshot = reloaded;
+        refreshProviders();
         m_status->setText("Configuration saved. Restart Core to apply changes.");
-        ConfigSnapshot reloaded;
-        if (m_client->load(&reloaded).succeeded) {
-            m_snapshot = reloaded;
-            refreshProviders();
-            m_status->setText("Configuration saved. Restart Core to apply changes.");
-        }
     }
+}
+
+void MainWindow::applyClaude()
+{
+    const ConfigResult result = saveConfiguration();
+    if (!result.succeeded) {
+        m_clientsPage->showConfigurationError(result);
+        return;
+    }
+    finishSuccessfulSave();
+    m_clientsPage->showClaudeResult(m_client->claudeApply());
 }
 
 void MainWindow::showResult(const ConfigResult &result)
