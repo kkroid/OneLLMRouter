@@ -47,6 +47,24 @@ func TestSnapshotResolvePreservesKeyByPrefix(t *testing.T) {
 	}
 }
 
+func TestSnapshotAppliesOnlyCodexOverwriteCatalogAndModels(t *testing.T) {
+	existing := DefaultConfig()
+	existing.Providers = []ProviderConfig{{Prefix: "alpha", BaseURL: "https://example.invalid", APIKey: "secret"}}
+	snapshot := NewSnapshot(existing)
+	snapshot.Codex.OverwriteCatalog = false
+
+	resolved, errors := snapshot.Resolve(existing)
+	if len(errors) != 0 {
+		t.Fatalf("Resolve() errors = %+v", errors)
+	}
+	if resolved.Codex.OverwriteCatalog {
+		t.Fatal("Resolve() ignored editable codex.overwrite_catalog")
+	}
+	if !reflect.DeepEqual(resolved.Server, existing.Server) || !reflect.DeepEqual(resolved.Retry, existing.Retry) {
+		t.Fatal("Resolve() changed a closed configuration section")
+	}
+}
+
 func TestRenderUpdatePreservesCommentsAndUnknownFields(t *testing.T) {
 	original := []byte(`# top comment
 future_setting: keep
@@ -78,12 +96,13 @@ codex:
 	}
 	proposed.Providers[0].BaseURL = "https://new.invalid"
 	proposed.Codex.Models["old"] = CodexModelConfig{DefaultReasoningLevel: "high", SupportedReasoningLevels: []string{"high"}}
+	proposed.Codex.OverwriteCatalog = true
 
 	updated, err := RenderUpdate(original, proposed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"# top comment", "# host comment", "# model comment", "future_setting: keep", "future_provider: keep", "future_codex: keep", "future_model: keep", "host: 127.0.0.1", "max_attempts: 4", "overwrite_catalog: false", "https://new.invalid"} {
+	for _, expected := range []string{"# top comment", "# host comment", "# model comment", "future_setting: keep", "future_provider: keep", "future_codex: keep", "future_model: keep", "host: 127.0.0.1", "max_attempts: 4", "overwrite_catalog: true", "https://new.invalid"} {
 		if !bytes.Contains(updated, []byte(expected)) {
 			t.Errorf("updated YAML omitted %q:\n%s", expected, updated)
 		}

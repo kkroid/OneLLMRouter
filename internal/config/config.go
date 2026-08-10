@@ -109,7 +109,8 @@ type Snapshot struct {
 }
 
 type SnapshotCodex struct {
-	Models map[string]CodexModelConfig `json:"models"`
+	OverwriteCatalog bool                        `json:"overwrite_catalog" yaml:"overwrite_catalog"`
+	Models           map[string]CodexModelConfig `json:"models" yaml:"models"`
 }
 
 type ProviderSnapshot struct {
@@ -140,7 +141,7 @@ func NewSnapshot(cfg *Config) Snapshot {
 	}
 	return Snapshot{
 		Providers:  providers,
-		Codex:      SnapshotCodex{Models: cfg.Codex.Models},
+		Codex:      SnapshotCodex{OverwriteCatalog: cfg.Codex.OverwriteCatalog, Models: cfg.Codex.Models},
 		ModelSlots: cfg.ModelSlots,
 	}
 }
@@ -165,7 +166,7 @@ func (s Snapshot) Resolve(existing *Config) (*Config, []FieldError) {
 	}
 	resolved := &Config{
 		Server: existing.Server, Log: existing.Log, Proxy: existing.Proxy, Retry: existing.Retry,
-		Codex:      CodexConfig{OverwriteCatalog: existing.Codex.OverwriteCatalog, Models: s.Codex.Models},
+		Codex:      CodexConfig{OverwriteCatalog: s.Codex.OverwriteCatalog, Models: s.Codex.Models},
 		ModelSlots: s.ModelSlots, Providers: make([]ProviderConfig, len(s.Providers)),
 	}
 	var errors []FieldError
@@ -354,7 +355,7 @@ func RenderUpdate(original []byte, proposed *Config) ([]byte, error) {
 		ModelSlots ModelSlotsConfig `yaml:"model_slots"`
 	}{
 		Providers:  proposed.Providers,
-		Codex:      SnapshotCodex{Models: proposed.Codex.Models},
+		Codex:      SnapshotCodex{OverwriteCatalog: proposed.Codex.OverwriteCatalog, Models: proposed.Codex.Models},
 		ModelSlots: proposed.ModelSlots,
 	}
 	proposedData, err := yaml.Marshal(managed)
@@ -374,7 +375,7 @@ func RenderUpdate(original []byte, proposed *Config) ([]byte, error) {
 	} else {
 		setProviders(originalProviders, proposedProviders)
 	}
-	setCodexModels(originalRoot, proposedRoot)
+	setCodex(originalRoot, proposedRoot)
 	setMappingSection(originalRoot, proposedRoot, "model_slots", []string{"default", "opus", "sonnet", "haiku", "fable"})
 	var output bytes.Buffer
 	encoder := yaml.NewEncoder(&output)
@@ -474,7 +475,7 @@ func setProviders(original, proposed *yaml.Node) {
 	original.Content = merged
 }
 
-func setCodexModels(originalRoot, proposedRoot *yaml.Node) {
+func setCodex(originalRoot, proposedRoot *yaml.Node) {
 	originalCodex := mappingValue(originalRoot, "codex")
 	proposedCodex := mappingValue(proposedRoot, "codex")
 	if proposedCodex == nil {
@@ -484,6 +485,7 @@ func setCodexModels(originalRoot, proposedRoot *yaml.Node) {
 		appendMapping(originalRoot, "codex", proposedCodex)
 		return
 	}
+	setMappingFields(originalCodex, proposedCodex, []string{"overwrite_catalog"})
 	originalModels := mappingValue(originalCodex, "models")
 	proposedModels := mappingValue(proposedCodex, "models")
 	if originalModels == nil {

@@ -70,6 +70,26 @@ func TestConfigValidateRejectsNonEditableFields(t *testing.T) {
 	}
 }
 
+func TestConfigValidateAcceptsCodexOverwriteCatalog(t *testing.T) {
+	path := writeCommandConfig(t)
+	setCommandConfigPath(t, path)
+	var output bytes.Buffer
+	cmd := configValidateCmd()
+	cmd.SetArgs([]string{"--json"})
+	cmd.SetIn(bytes.NewBufferString(`{"providers":[{"name":"Alpha","prefix":"alpha","base_url":"https://example.invalid","openai_base_url":"","responses_base_url":"","api_key_set":true,"models":["model"],"proxy":null}],"codex":{"overwrite_catalog":true,"models":{}},"model_slots":{"default":"alpha/model"}}`))
+	cmd.SetOut(&output)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var result configValidationResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || len(result.Errors) != 0 {
+		t.Fatalf("validation result = %+v", result)
+	}
+}
+
 func TestConfigValidateDoesNotEchoMalformedSecretInput(t *testing.T) {
 	path := writeCommandConfig(t)
 	setCommandConfigPath(t, path)

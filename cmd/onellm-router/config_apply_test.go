@@ -27,6 +27,7 @@ func TestConfigApplyPreservesCommentsUnknownFieldsAndOldKey(t *testing.T) {
 	snapshot := config.NewSnapshot(existing)
 	snapshot.Providers[0].BaseURL = "https://changed.invalid"
 	snapshot.ModelSlots.Default = "alpha/model"
+	snapshot.Codex.OverwriteCatalog = true
 	input, err := json.Marshal(snapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +45,7 @@ func TestConfigApplyPreservesCommentsUnknownFieldsAndOldKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldKey := "old-" + "secret"
-	for _, expected := range []string{"# keep comment", "future_setting: keep", "http_port: 3456", "https://changed.invalid", oldKey} {
+	for _, expected := range []string{"# keep comment", "future_setting: keep", "http_port: 3456", "overwrite_catalog: true", "https://changed.invalid", oldKey} {
 		if !bytes.Contains(updated, []byte(expected)) {
 			t.Errorf("updated config omitted %q:\n%s", expected, updated)
 		}

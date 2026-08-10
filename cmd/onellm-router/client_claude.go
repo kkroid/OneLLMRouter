@@ -31,7 +31,7 @@ var errMachineOutput = errors.New("machine output reported failure")
 
 func clientCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "client", Short: "Inspect and configure supported clients"}
-	cmd.AddCommand(claudeClientCmd())
+	cmd.AddCommand(claudeClientCmd(), clientCodexCmd())
 	return cmd
 }
 
