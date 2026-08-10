@@ -106,12 +106,12 @@ void MainWindow::buildUi()
     m_supportedReasoning = new QLineEdit(modelsPage); m_supportedReasoning->setObjectName("supportedReasoning");
     reasoning->addRow("Default reasoning", m_defaultReasoning);
     reasoning->addRow("Supported reasoning (comma separated)", m_supportedReasoning);
-    for (const QString &slot : {"default", "opus", "sonnet", "haiku", "fable"}) {
-        auto *edit = new QLineEdit(modelsPage); edit->setObjectName("slot_" + slot);
-        m_slots.insert(slot, edit); reasoning->addRow("Claude " + slot, edit);
-    }
     modelsLayout->addLayout(reasoning);
     m_tabs->addTab(modelsPage, "Models");
+
+    m_clientsPage = new ClientsPage(m_client, m_tabs);
+    m_clientsPage->setObjectName("clientsPage");
+    m_tabs->addTab(m_clientsPage, "Clients");
 
     auto *usagePage = new UsagePage(m_usageClient, m_tabs);
     usagePage->setObjectName("usagePage");
@@ -127,7 +127,6 @@ void MainWindow::buildUi()
                       discover, m_name, m_prefix, m_baseUrl, m_openAIBaseUrl,
                       m_responsesBaseUrl, m_apiKey, m_proxy, m_modelName,
                       m_protocol, m_defaultReasoning, m_supportedReasoning, m_save};
-    for (QLineEdit *slot : m_slots) m_editControls.append(slot);
     connect(m_providerList, &QListWidget::currentRowChanged, this, &MainWindow::selectProvider);
     connect(add, &QPushButton::clicked, this, &MainWindow::addProvider);
     connect(remove, &QPushButton::clicked, this, &MainWindow::removeProvider);
@@ -148,12 +147,10 @@ void MainWindow::buildUi()
             m_snapshot.codexModels[m_modelList->currentItem()->text()].supportedLevels =
                 reasoningLevels(text);
     });
-    for (auto iterator = m_slots.cbegin(); iterator != m_slots.cend(); ++iterator) {
-        connect(iterator.value(), &QLineEdit::textChanged, this,
-                [this, slot = iterator.key()](const QString &value) {
-                    m_snapshot.modelSlots.insert(slot, value);
-                });
-    }
+    connect(m_clientsPage, &ClientsPage::modelSlotChanged, this,
+            [this](const QString &slot, const QString &value) {
+                m_snapshot.modelSlots.insert(slot, value);
+            });
     connect(m_save, &QPushButton::clicked, this, &MainWindow::save);
     connect(m_client, &ConfigClient::modelsDiscovered, this,
             [this](const QString &providerPrefix, const QStringList &models) {
@@ -192,6 +189,7 @@ void MainWindow::setReadOnly(bool readOnly)
 {
     m_readOnly = readOnly;
     for (QWidget *control : m_editControls) control->setEnabled(!readOnly);
+    m_clientsPage->setReadOnly(readOnly);
     if (readOnly) m_status->setText("Externally managed Core: configuration is read-only");
     else if (m_status->text() == "Externally managed Core: configuration is read-only")
         m_status->clear();
@@ -204,6 +202,7 @@ void MainWindow::refreshProviders()
     for (const ProviderConfigSnapshot &provider : m_snapshot.providers)
         m_providerList->addItem(provider.name.isEmpty() ? provider.prefix : provider.name);
     if (!m_snapshot.providers.isEmpty()) m_providerList->setCurrentRow(qMin(row, m_snapshot.providers.size() - 1));
+    m_clientsPage->setConfiguration(m_snapshot);
 }
 
 void MainWindow::selectProvider(int row)
@@ -303,8 +302,6 @@ void MainWindow::refreshReasoning()
     const CodexReasoningConfig config = m_snapshot.codexModels.value(model);
     m_defaultReasoning->setText(config.defaultLevel);
     m_supportedReasoning->setText(config.supportedLevels.join(','));
-    for (auto iterator = m_slots.begin(); iterator != m_slots.end(); ++iterator)
-        iterator.value()->setText(m_snapshot.modelSlots.value(iterator.key()));
 }
 
 QMap<int, QString> MainWindow::pendingKeys() const
@@ -315,8 +312,6 @@ QMap<int, QString> MainWindow::pendingKeys() const
 void MainWindow::save()
 {
     saveProvider();
-    for (auto iterator = m_slots.cbegin(); iterator != m_slots.cend(); ++iterator)
-        m_snapshot.modelSlots.insert(iterator.key(), iterator.value()->text());
     const QMap<int, QString> keys = pendingKeys();
     ConfigResult result = m_client->validate(m_snapshot, keys);
     if (result.succeeded) result = m_client->apply(m_snapshot, keys);

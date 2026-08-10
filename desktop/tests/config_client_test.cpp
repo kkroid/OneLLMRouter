@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QDir>
 #include <QFile>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -12,8 +13,28 @@ class ConfigClientTest : public QObject
     Q_OBJECT
 private slots:
     void coreRoundTripIsSecretSafe();
+    void clientCommandsUseCoreContracts();
     void discoversProtocolModels_data();
     void discoversProtocolModels();
+};
+
+class HomeEnvironment
+{
+public:
+    explicit HomeEnvironment(const QString &home)
+        : oldHome(qgetenv("HOME")), oldProfile(qgetenv("USERPROFILE"))
+    {
+        qputenv("HOME", home.toUtf8());
+        qputenv("USERPROFILE", home.toUtf8());
+    }
+    ~HomeEnvironment()
+    {
+        qputenv("HOME", oldHome);
+        qputenv("USERPROFILE", oldProfile);
+    }
+private:
+    QByteArray oldHome;
+    QByteArray oldProfile;
 };
 
 void ConfigClientTest::coreRoundTripIsSecretSafe()
@@ -48,6 +69,96 @@ void ConfigClientTest::coreRoundTripIsSecretSafe()
     QCOMPARE(reloaded.modelSlots.value("default"), QString("alpha/new-model"));
     const QByteArray yaml = [&] { QFile applied(path); applied.open(QIODevice::ReadOnly); return applied.readAll(); }();
     QVERIFY(yaml.contains("old-secret"));
+}
+
+void ConfigClientTest::clientCommandsUseCoreContracts()
+{
+    const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    HomeEnvironment environment(directory.path());
+    const QString configPath = directory.filePath("router.yaml");
+    QFile config(configPath);
+    QVERIFY(config.open(QIODevice::WriteOnly));
+    config.write("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
+                 "  - name: Alpha\n    prefix: alpha\n    base_url: https://alpha.invalid\n"
+                 "    responses_base_url: https://alpha.invalid\n    api_key: fake-key\n"
+                 "    models: [model]\ncodex:\n  overwrite_catalog: false\n  models: {}\n"
+                 "model_slots:\n  default: alpha/model\n  opus: alpha/model\n"
+                 "  sonnet: alpha/model\n  haiku: alpha/model\n  fable: alpha/model\n");
+    config.close();
+    ConfigClient client(core, configPath);
+
+    ClientCommandResult claude = client.claudeStatus();
+    QVERIFY(claude.succeeded);
+    QCOMPARE(claude.claude.syncState, QString("absent"));
+    claude = client.claudeApply();
+    QVERIFY(claude.succeeded);
+    QCOMPARE(claude.claude.syncState, QString("current"));
+    QVERIFY(claude.claude.changed);
+    claude = client.claudeStatus();
+    QCOMPARE(claude.claude.syncState, QString("current"));
+
+    QFile settings(directory.filePath(".claude/settings.json"));
+    QVERIFY(settings.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    const QByteArray different =
+        "{\"theme\":\"dark\",\"env\":{\"ANTHROPIC_MODEL\":\"different/model\"}}";
+    settings.write(different);
+    settings.close();
+    QCOMPARE(client.claudeStatus().claude.syncState, QString("different"));
+    claude = client.claudeApply();
+    QVERIFY(claude.succeeded);
+    QVERIFY(claude.claude.backupCreated);
+    claude = client.claudeRestore();
+    QVERIFY(claude.succeeded);
+    QCOMPARE(claude.claude.syncState, QString("different"));
+    QVERIFY(settings.open(QIODevice::ReadOnly));
+    QCOMPARE(settings.readAll(), different);
+    settings.close();
+    QVERIFY(settings.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    settings.write("invalid");
+    settings.close();
+    const ClientCommandResult invalid = client.claudeApply();
+    QVERIFY(!invalid.succeeded);
+    QCOMPARE(invalid.claude.parseState, QString("invalid"));
+    QCOMPARE(invalid.errors.first().code, QString("settings_invalid"));
+
+    ClientCommandResult codex = client.codexStatus();
+    QVERIFY(codex.succeeded);
+    QCOMPARE(codex.codex.configSyncState, QString("absent"));
+    QDir().mkpath(directory.filePath(".codex"));
+    QFile codexConfig(directory.filePath(".codex/config.toml"));
+    QVERIFY(codexConfig.open(QIODevice::WriteOnly));
+    codexConfig.write("model = \"alpha/model\"\nmodel_provider = \"different\"\n");
+    codexConfig.close();
+    codex = client.codexStatus();
+    QVERIFY(codex.succeeded);
+    QCOMPARE(codex.codex.configSyncState, QString("different"));
+    QCOMPARE(codex.codex.sourceTag, QString("OneLLMRouter"));
+    QVERIFY(codexConfig.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    codexConfig.write(QString(
+        "model = \"alpha/model\"\nmodel_provider = \"onellm\"\n"
+        "model_catalog_json = \"%1\"\n\n[model_providers.onellm]\n"
+        "name = \"OneLLMRouter\"\nbase_url = \"http://localhost:3456/openai/v1\"\n"
+        "wire_api = \"responses\"\nrequires_openai_auth = true\n")
+        .arg(directory.filePath(".onellm/model-catalog.json").replace("\\", "\\\\"))
+        .toUtf8());
+    codexConfig.close();
+    QCOMPARE(client.codexStatus().codex.configSyncState, QString("current"));
+    QVERIFY(codexConfig.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    codexConfig.write("invalid = [");
+    codexConfig.close();
+    QCOMPARE(client.codexStatus().codex.configSyncState, QString("invalid"));
+    codex = client.codexPreview("alpha/model");
+    QVERIFY(codex.succeeded);
+    QVERIFY(codex.codex.snippet.contains("model = \"alpha/model\""));
+    QVERIFY(!codex.codex.configWriteSupported);
+    codex = client.codexCatalogApply();
+    QVERIFY(codex.succeeded);
+    QCOMPARE(QDir::fromNativeSeparators(codex.codex.writtenPaths.first()),
+             directory.filePath(".onellm/model-catalog.json"));
+    QVERIFY(QFile::exists(directory.filePath(".onellm/model-catalog.json")));
+    QVERIFY(!QFile::exists(directory.filePath(".codex/model-catalog.json")));
 }
 
 void ConfigClientTest::discoversProtocolModels_data()

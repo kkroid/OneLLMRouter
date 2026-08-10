@@ -25,6 +25,10 @@ add_executable(onellm-router-tray WIN32
     src/main_window.h
     src/config/config_client.cpp
     src/config/config_client.h
+    src/clients/clients_model.cpp
+    src/clients/clients_model.h
+    src/clients/clients_page.cpp
+    src/clients/clients_page.h
     src/proxy_probe.cpp
     src/proxy_probe.h
     src/router_discovery.cpp

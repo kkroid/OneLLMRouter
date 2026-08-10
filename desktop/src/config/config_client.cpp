@@ -67,15 +67,14 @@ ConfigResult ConfigClient::run(const QStringList &arguments, const QByteArray &i
         return {false, "Core command timed out"};
     }
     const QByteArray standardOutput = process.readAllStandardOutput();
-    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        return {false, "Core command failed"};
-    }
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(standardOutput, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         return {false, "Core returned invalid JSON"};
     }
     *output = document.object();
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+        return {false, "Core command failed"};
     return {true};
 }
 
@@ -103,7 +102,9 @@ ConfigResult ConfigClient::load(ConfigSnapshot *snapshot) const
                 : ProviderConfigSnapshot::ProxyPolicy::Direct;
         loaded.providers.append(provider);
     }
-    const QJsonObject models = root.value("codex").toObject().value("models").toObject();
+    const QJsonObject codex = root.value("codex").toObject();
+    loaded.overwriteCatalog = codex.value("overwrite_catalog").toBool();
+    const QJsonObject models = codex.value("models").toObject();
     for (auto iterator = models.begin(); iterator != models.end(); ++iterator) {
         CodexReasoningConfig reasoning;
         const QJsonObject object = iterator.value().toObject();
@@ -147,8 +148,55 @@ QByteArray ConfigClient::serialize(const ConfigSnapshot &snapshot,
     for (auto iterator = snapshot.modelSlots.cbegin(); iterator != snapshot.modelSlots.cend(); ++iterator)
         modelSlots.insert(iterator.key(), iterator.value());
     return QJsonDocument(QJsonObject{{"providers", providers},
-                                     {"codex", QJsonObject{{"models", codexModels}}},
+                                     {"codex", QJsonObject{{"overwrite_catalog", snapshot.overwriteCatalog},
+                                                            {"models", codexModels}}},
                                      {"model_slots", modelSlots}}).toJson(QJsonDocument::Compact);
+}
+
+ClientCommandResult ConfigClient::runClient(const QStringList &arguments,
+                                            const QString &client) const
+{
+    QJsonObject output;
+    const ConfigResult command = run(arguments, {}, &output);
+    if (output.isEmpty()) return {false, command.error};
+    ClientCommandResult result = client == "claude"
+        ? parseClaudeClientEnvelope(output) : parseCodexClientEnvelope(output);
+    if (!command.succeeded && result.succeeded) {
+        result.succeeded = false;
+        result.error = command.error;
+    }
+    return result;
+}
+
+ClientCommandResult ConfigClient::claudeStatus() const
+{
+    return runClient({"client", "claude", "status", "--json"}, "claude");
+}
+
+ClientCommandResult ConfigClient::claudeApply() const
+{
+    return runClient({"client", "claude", "apply", "--json"}, "claude");
+}
+
+ClientCommandResult ConfigClient::claudeRestore() const
+{
+    return runClient({"client", "claude", "restore", "--json"}, "claude");
+}
+
+ClientCommandResult ConfigClient::codexStatus() const
+{
+    return runClient({"client", "codex", "status", "--json"}, "codex");
+}
+
+ClientCommandResult ConfigClient::codexPreview(const QString &model) const
+{
+    return runClient({"client", "codex", "preview", "--model", model, "--json"},
+                     "codex");
+}
+
+ClientCommandResult ConfigClient::codexCatalogApply() const
+{
+    return runClient({"client", "codex", "catalog-apply", "--json"}, "codex");
 }
 
 ConfigResult ConfigClient::validate(const ConfigSnapshot &snapshot,

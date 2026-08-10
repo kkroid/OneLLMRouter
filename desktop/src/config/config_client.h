@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../clients/clients_model.h"
+
 #include <QJsonObject>
 #include <QList>
 #include <QMap>
@@ -27,6 +29,7 @@ struct ConfigSnapshot {
     QList<ProviderConfigSnapshot> providers;
     QMap<QString, CodexReasoningConfig> codexModels;
     QMap<QString, QString> modelSlots;
+    bool overwriteCatalog = false;
 };
 
 struct ConfigFieldError {
@@ -54,6 +57,12 @@ public:
                           const QMap<int, QString> &apiKeys = {}) const;
     ConfigResult apply(const ConfigSnapshot &snapshot,
                        const QMap<int, QString> &apiKeys = {}) const;
+    ClientCommandResult claudeStatus() const;
+    ClientCommandResult claudeApply() const;
+    ClientCommandResult claudeRestore() const;
+    ClientCommandResult codexStatus() const;
+    ClientCommandResult codexPreview(const QString &model) const;
+    ClientCommandResult codexCatalogApply() const;
     void discoverModels(const ProviderConfigSnapshot &provider,
                         ModelProtocol protocol, const QString &apiKey = {});
 
@@ -66,6 +75,8 @@ signals:
 private:
     ConfigResult run(const QStringList &arguments, const QByteArray &input,
                      QJsonObject *output) const;
+    ClientCommandResult runClient(const QStringList &arguments,
+                                  const QString &client) const;
     static QByteArray serialize(const ConfigSnapshot &snapshot,
                                 const QMap<int, QString> &apiKeys);
 

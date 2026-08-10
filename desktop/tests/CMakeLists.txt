@@ -81,6 +81,8 @@ add_executable(tray_application_test
     ../src/main_window.h
     ../src/config/config_client.cpp
     ../src/config/config_client.h
+    ../src/clients/clients_model.cpp
+    ../src/clients/clients_page.cpp
     ../src/usage/usage_model.cpp
     ../src/usage/usage_model.h
     ../src/usage/usage_page.cpp
@@ -125,6 +127,7 @@ add_executable(config_client_test
     config_client_test.cpp
     ../src/config/config_client.cpp
     ../src/config/config_client.h
+    ../src/clients/clients_model.cpp
 )
 target_include_directories(config_client_test PRIVATE ../src)
 target_link_libraries(config_client_test PRIVATE Qt6::Test Qt6::Network)
@@ -135,12 +138,41 @@ set_tests_properties(config_client_test PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
+add_executable(clients_model_test
+    clients_model_test.cpp
+    ../src/clients/clients_model.cpp
+)
+target_include_directories(clients_model_test PRIVATE ../src)
+target_link_libraries(clients_model_test PRIVATE Qt6::Test)
+add_test(NAME clients_model_test COMMAND clients_model_test)
+set_tests_properties(clients_model_test PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_executable(clients_page_test
+    clients_page_test.cpp
+    ../src/clients/clients_model.cpp
+    ../src/clients/clients_page.cpp
+    ../src/config/config_client.cpp
+)
+target_include_directories(clients_page_test PRIVATE ../src)
+target_link_libraries(clients_page_test PRIVATE Qt6::Test Qt6::Widgets Qt6::Network)
+add_dependencies(clients_page_test onellm_test_core)
+add_test(NAME clients_page_test COMMAND clients_page_test)
+set_tests_properties(clients_page_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;ONELLM_TEST_CORE=${ONELLM_TEST_CORE}"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
 add_executable(main_window_test
     main_window_test.cpp
     ../src/main_window.cpp
     ../src/main_window.h
     ../src/config/config_client.cpp
     ../src/config/config_client.h
+    ../src/clients/clients_model.cpp
+    ../src/clients/clients_page.cpp
+    ../src/clients/clients_page.h
     ../src/usage/usage_model.cpp
     ../src/usage/usage_model.h
     ../src/usage/usage_page.cpp

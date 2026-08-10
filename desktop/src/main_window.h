@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config/config_client.h"
+#include "clients/clients_page.h"
 #include "usage/usage_page.h"
 
 #include <QMainWindow>
@@ -58,7 +59,7 @@ private:
     QLineEdit *m_modelName;
     QLineEdit *m_defaultReasoning;
     QLineEdit *m_supportedReasoning;
-    QMap<QString, QLineEdit *> m_slots;
+    ClientsPage *m_clientsPage;
     QLabel *m_status;
     QPushButton *m_save;
     QList<QWidget *> m_editControls;
