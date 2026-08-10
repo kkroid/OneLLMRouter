@@ -8,11 +8,14 @@ All notable user-facing changes to OneLLMRouter are documented here.
 
 - Added per-attempt Usage collection for Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses across direct, translated, streaming, and non-streaming paths. Records preserve unknown token fields and link retries through a stable request ID plus one-based upstream attempt number.
 - Added `stats day`, `stats week`, and `stats month` table/JSON reports grouped by provider, requested model, and upstream model, plus Qt Providers, Models, and Usage pages backed by Core configuration and statistics contracts.
+- Added a Qt Clients page and Core commands for controlled Claude Code managed-key merge, one-level backup, and exact restore. Unrelated Claude preferences and upstream provider keys remain untouched.
+- Added read-only Codex TOML status, copyable configuration preview, deterministic catalog synchronization, and the display-only `OneLLMRouter` source tag. v1.5.0 does not write `config.toml` or expose raw TOML/catalog editing.
 - Added Windows, Linux, and macOS Go and Qt build/test gates. Release artifacts remain Windows x64 only; Linux/macOS installers, autostart, daemonization, and application restart integration are not shipped.
 
 ### Changed
 
 - Preserved the existing same-provider retry defaults and the no-replay boundary after streaming output begins. Usage now records successful, exhausted, client-cancelled, and service-shutdown attempts without changing retry parameters.
+- Kept MCP/Skill/Prompt management, Auto Failover, raw client-file editing, and unrelated preference editing outside the v1.5.0 scope.
 
 ### Fixed
 

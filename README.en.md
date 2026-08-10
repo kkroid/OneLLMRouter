@@ -143,7 +143,7 @@ Configured provider models take precedence over upstream discovery. When `models
 .\dist\onellm-router-v1.5.0.exe
 ```
 
-The service prints the Claude Code environment block at startup. The main CLI commands are:
+The service prints the Claude Code environment block at startup. The desktop Clients page or the `client claude` commands can apply it through a controlled merge. The main CLI commands are:
 
 ```text
 onellm-router serve          Start the router explicitly
@@ -177,6 +177,16 @@ Use the local Anthropic base URL and a configured `provider/model` identifier:
 }
 ```
 
+The desktop Clients page and Core commands can inspect, apply, and restore `~/.claude/settings.json`:
+
+```text
+onellm-router client claude status --json
+onellm-router client claude apply --json
+onellm-router client claude restore --json
+```
+
+Apply merges only the seven `env` keys shown above and preserves every other top-level and `env` field. Before replacing an existing file it writes the exact previous bytes to the sibling `settings.json.bak`; restore puts those bytes back. `ANTHROPIC_AUTH_TOKEN` is always the non-secret local placeholder `x`, never an upstream provider key. OneLLMRouter does not manage themes, permissions, hooks, MCP, Skills, Prompts, or other Claude preferences.
+
 ## Codex
 
 Point a Codex provider at OneLLMRouter's Responses endpoint:
@@ -184,16 +194,26 @@ Point a Codex provider at OneLLMRouter's Responses endpoint:
 ```toml
 model = "example/gpt-5.6-sol"
 model_provider = "onellm"
-model_catalog_json = "C:/Users/<you>/.codex/model-catalog.json"
+model_catalog_json = "C:/Users/<you>/.onellm/model-catalog.json"
 
 [model_providers.onellm]
 name = "OneLLMRouter"
-base_url = "http://127.0.0.1:3456/openai/v1"
+base_url = "http://localhost:3456/openai/v1"
 wire_api = "responses"
 requires_openai_auth = true
 ```
 
 At startup, OneLLMRouter always writes `~/.onellm/model-catalog.json`. With the default `codex.overwrite_catalog: true`, it also replaces `~/.codex/model-catalog.json`, so Codex `/model` can list `provider/model` entries. Set the option to `false` to leave the Codex file untouched.
+
+The desktop Clients page and Core commands parse `~/.codex/config.toml` read-only and report config/catalog paths, the effective model and provider, synchronization state, model count, and the display-only `OneLLMRouter` source tag. They also provide a copyable preview and controlled catalog synchronization:
+
+```text
+onellm-router client codex status --json
+onellm-router client codex preview --model example/gpt-5.6-sol --json
+onellm-router client codex catalog-apply --json
+```
+
+v1.5.0 never writes, backs up, or restores Codex `config.toml`, and it has no raw TOML or catalog JSON editor. `catalog-apply` regenerates only the OneLLMRouter catalog and writes the legacy Codex catalog path only when `codex.overwrite_catalog: true`.
 
 The local provider prefix is removed before an inference request is sent upstream. For example, selecting `example/gpt-5.6-sol` sends `gpt-5.6-sol` to the provider.
 
@@ -207,7 +227,7 @@ Providers may charge for failed or ambiguous attempts. OneLLMRouter cannot guara
 
 ## Windows Desktop
 
-The Qt desktop provides Providers and Models editors backed by Core validation and atomic configuration updates, plus a Usage page that reads the Core day/week/month statistics. Existing API keys are never displayed; configuration changes require a Core restart. The tray also displays router health, version, model count, configured port, and local SOCKS5 reachability. It chooses English or Simplified Chinese from the system locale.
+The Qt desktop provides Providers, Models, Clients, and Usage pages. Provider/model changes use Core validation and atomic configuration updates, existing API keys are never displayed, and configuration changes require a Core restart. Clients provides the controlled Claude merge/restore and read-only Codex status/preview/catalog sync described above. Usage reads the Core day/week/month statistics. v1.5.0 has no MCP/Skill/Prompt management, Auto Failover, raw client-file editor, or unrelated preference editor. The tray also displays router health, version, model count, configured port, and local SOCKS5 reachability. It chooses English or Simplified Chinese from the system locale.
 
 The tray controls only a core process that it started itself. A matching externally started router is attached read-only, while an unrelated listener is reported as a port conflict. Stop and restart are graceful; the application does not enumerate or terminate processes by image name.
 

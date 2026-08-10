@@ -153,7 +153,7 @@ model_slots:
 .\dist\onellm-router-v1.5.0.exe
 ```
 
-启动时会打印 Claude Code 的 `settings.json`，可直接用于配置客户端。
+启动时会打印 Claude Code 的环境配置。也可以使用桌面 Clients 页面，或使用下面的 `client claude` 命令受控写入。
 
 ### 4. 验证
 
@@ -213,11 +213,19 @@ curl -N -X POST http://localhost:3456/openai/v1/responses \
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "ds/deepseek-v4-pro[1m]",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "ds/deepseek-v4-flash[1m]",
     "ANTHROPIC_DEFAULT_FABLE_MODEL": "ds/deepseek-v4-flash[1m]"
-  },
-  "theme": "dark",
-  "skipWorkflowUsageWarning": true
+  }
 }
 ```
+
+桌面 Clients 页面和 Core 命令可以检查、应用和恢复 `~/.claude/settings.json`：
+
+```bash
+onellm-router client claude status --json
+onellm-router client claude apply --json
+onellm-router client claude restore --json
+```
+
+应用操作只合并上面七个 `env` 键，保留其他顶层字段和 `env` 字段；修改已有文件前会创建同目录的 `settings.json.bak`，恢复时精确还原该备份。`ANTHROPIC_AUTH_TOKEN` 固定为连接本地 Router 的非秘密占位值 `x`，不会写入上游 Provider API Key。主题、权限、hooks、MCP、Skill、Prompt 和其他 Claude 偏好不由 OneLLMRouter 管理。
 
 ## OpenAI 兼容工具配置
 
@@ -239,16 +247,26 @@ curl -N -X POST http://localhost:3456/openai/v1/responses \
 ```toml
 model = "c78/gpt-5.6-sol"
 model_provider = "onellm"
-model_catalog_json = "C:/Users/<you>/.codex/model-catalog.json"
+model_catalog_json = "C:/Users/<you>/.onellm/model-catalog.json"
 
 [model_providers.onellm]
 name = "OneLLMRouter"
-base_url = "http://127.0.0.1:3456/openai/v1"
+base_url = "http://localhost:3456/openai/v1"
 wire_api = "responses"
 requires_openai_auth = true
 ```
 
 启动 OneLLMRouter 后会始终生成 `~/.onellm/model-catalog.json`。默认配置 `codex.overwrite_catalog: true` 还会覆盖 `~/.codex/model-catalog.json`，Codex 的 `/model` 因而可以列出 `provider/model` 形式的模型。设置为 `false` 时只更新 OneLLMRouter 自己的目录文件。
+
+桌面 Clients 页面和 Core 命令会只读解析 `~/.codex/config.toml`，展示配置/catalog 路径、有效模型和 Provider、同步状态、模型数及显示用来源标识 `OneLLMRouter`，并提供可复制预览和受控 catalog 同步：
+
+```bash
+onellm-router client codex status --json
+onellm-router client codex preview --model c78/gpt-5.6-sol --json
+onellm-router client codex catalog-apply --json
+```
+
+v1.5.0 不写入、备份或恢复 Codex `config.toml`，也不提供原始 TOML 或 catalog JSON 编辑器。`catalog-apply` 只重新生成 OneLLMRouter catalog；仅当 `codex.overwrite_catalog: true` 时才同步旧的 Codex catalog 路径。
 
 每个 Responses provider 使用 `responses_base_url`，OneLLMRouter 会在请求上游前移除模型 ID 中的 `provider/` 前缀。例如本地选择 `c78/gpt-5.6-sol`，上游收到的模型名是 `gpt-5.6-sol`。
 
@@ -271,7 +289,7 @@ onellm-router stats month    # 查看 UTC 月 Token Usage
 
 ### 桌面配置与 Usage
 
-Qt 桌面提供 Providers、Models 和 Usage 页面。Provider/模型修改由 Core 校验并原子写回，旧 API Key 不会显示，保存后需要重启 Core 生效；附着到外部 Core 时保持只读。Usage 页面直接读取 Core 的日/周/月统计，不自行聚合 JSONL。
+Qt 桌面提供 Providers、Models、Clients 和 Usage 页面。Provider/模型修改由 Core 校验并原子写回，旧 API Key 不会显示，保存后需要重启 Core 生效；附着到外部 Core 时保持只读。Clients 页面提供上述 Claude 受控合并/恢复和 Codex 只读状态/预览/catalog 同步；Usage 页面直接读取 Core 的日/周/月统计，不自行聚合 JSONL。v1.5.0 不提供 MCP、Skill、Prompt 管理、Auto Failover、原始客户端文件编辑器或无关偏好编辑器。
 
 ### 平台能力矩阵
 

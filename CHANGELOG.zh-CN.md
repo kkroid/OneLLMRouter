@@ -8,11 +8,14 @@
 
 - 为 Anthropic Messages、OpenAI Chat Completions 和 OpenAI Responses 的直通、翻译、流式和非流式路径新增逐 attempt Usage 采集。记录保留未知 token 字段，并通过稳定的 request ID 和从 1 开始的上游尝试序号关联重试。
 - 新增按 Provider、请求模型和上游模型分组的 `stats day`、`stats week`、`stats month` 表格/JSON 统计，以及由 Core 配置与统计契约驱动的 Qt Providers、Models 和 Usage 页面。
+- 新增 Qt Clients 页面和 Core 命令，用于 Claude Code 受控 managed-key 合并、单层备份和精确恢复；不修改无关 Claude 偏好，也不会写入上游 Provider API Key。
+- 新增 Codex TOML 只读状态、可复制配置预览、确定性 catalog 同步和仅用于显示的 `OneLLMRouter` 来源标识。v1.5.0 不写入 `config.toml`，也不提供原始 TOML/catalog 编辑。
 - 新增 Windows、Linux、macOS 的 Go 与 Qt 构建/测试门禁。发行产物仍仅提供 Windows x64；Linux/macOS 安装包、开机自启、daemon 和应用重启集成未交付。
 
 ### 变更
 
 - 保持现有同 Provider 重试默认值和流式输出开始后不重放的边界。Usage 现在覆盖成功、重试耗尽、客户端取消和服务关闭 attempt，不改变 Retry 参数。
+- MCP/Skill/Prompt 管理、Auto Failover、原始客户端文件编辑和无关偏好编辑仍不属于 v1.5.0 范围。
 
 ### 修复
 
