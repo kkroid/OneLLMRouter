@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -174,7 +175,7 @@ func serveCmd() *cobra.Command {
 				)
 			}
 
-			printClaudeCodeSettings(cfg)
+			printClaudeCodeSettings(os.Stdout, cfg)
 
 			if shouldDetachFromTerminal(daemon, trayChild) {
 				if err := detachFromTerminal(); err != nil {
@@ -352,7 +353,7 @@ func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler 
 	mux.Handle("/openai/responses", withPanicRecover(responsesH, logger)) // some tools omit /v1
 }
 
-func printClaudeCodeSettings(cfg *config.Config) {
+func printClaudeCodeSettings(output io.Writer, cfg *config.Config) {
 	slots := cfg.ModelSlots
 	settings := map[string]interface{}{
 		"env": map[string]string{
@@ -364,13 +365,11 @@ func printClaudeCodeSettings(cfg *config.Config) {
 			"ANTHROPIC_DEFAULT_HAIKU_MODEL":  slots.Haiku,
 			"ANTHROPIC_DEFAULT_FABLE_MODEL":  slots.Fable,
 		},
-		"theme":                    "dark",
-		"skipWorkflowUsageWarning": true,
 	}
 
 	out, _ := json.MarshalIndent(settings, "", "  ")
-	fmt.Println()
-	fmt.Println(string(out))
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, string(out))
 }
 
 type statusWriter struct {

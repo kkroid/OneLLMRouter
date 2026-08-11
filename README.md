@@ -327,12 +327,16 @@ OneLLMRouter/
 ├── cmd/onellm-router/main.go           # CLI 入口
 ├── internal/
 │   ├── catalog/                       # 多 provider 模型发现 + Codex catalog
+│   ├── claudeconfig/                  # Claude Code 配置状态与受控合并
+│   ├── codexconfig/                   # Codex 配置状态与 catalog 同步
 │   ├── config/                        # YAML 配置加载
 │   ├── log/                           # slog + 按日滚动
 │   ├── proxy/                         # HTTP 代理与协议适配
 │   ├── router/                        # Provider 解析 + 模型路由
-│   └── translate/                     # Anthropic ↔ OpenAI 协议翻译
-├── desktop/                           # Qt 6 托盘、状态图标与测试
+│   ├── translate/                     # Anthropic ↔ OpenAI 协议翻译
+│   ├── upstream/                      # 有界重试、取消与错误脱敏
+│   └── usage/                         # Usage 采集、存储与统计
+├── desktop/                           # Qt 6 Providers/Clients/Usage、托盘与测试
 ├── installer/                         # Inno Setup 安装程序
 ├── onellm-router.example.yaml          # 配置模板
 ├── build.ps1                          # 便携版与桌面版构建脚本

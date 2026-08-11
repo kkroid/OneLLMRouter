@@ -261,12 +261,15 @@ Upstream error summaries in logs are bounded and redact configured API keys, Aut
 ```text
 cmd/onellm-router/   Go CLI and service lifecycle
 internal/catalog/    Multi-provider discovery and Codex catalogs
+internal/claudeconfig/ Claude Code status and controlled settings merge
+internal/codexconfig/ Codex status and catalog synchronization
 internal/config/     YAML configuration
 internal/proxy/      HTTP endpoints and protocol adapters
 internal/router/     Provider and model resolution
 internal/translate/  Anthropic/OpenAI translation
 internal/upstream/   Retry execution and credential redaction
-desktop/             Qt tray and tests
+internal/usage/      Usage collection, storage, and statistics
+desktop/             Qt Providers/Clients/Usage, tray, and tests
 installer/           Inno Setup definition
 tools/               Release and safety tests
 ```

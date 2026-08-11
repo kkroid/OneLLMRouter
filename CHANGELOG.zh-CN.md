@@ -2,12 +2,12 @@
 
 这里记录 OneLLMRouter 面向使用者的重要变更。
 
-## [未发布]
+## [1.5.0] - 2026-08-11
 
 ### 新增
 
 - 为 Anthropic Messages、OpenAI Chat Completions 和 OpenAI Responses 的直通、翻译、流式和非流式路径新增逐 attempt Usage 采集。记录保留未知 token 字段，并通过稳定的 request ID 和从 1 开始的上游尝试序号关联重试。
-- 新增按 Provider、请求模型和上游模型分组的 `stats day`、`stats week`、`stats month` 表格/JSON 统计，以及由 Core 配置与统计契约驱动的 Qt Providers、Models 和 Usage 页面。
+- 新增按 Provider、请求模型和上游模型分组的 `stats day`、`stats week`、`stats month` 表格/JSON 统计，以及由 Core 配置与统计契约驱动的 Qt Providers、Clients 和 Usage 页面；模型管理位于 Providers 页面内。
 - 新增 Qt Clients 页面和 Core 命令，用于 Claude Code 受控 managed-key 合并、单层备份和精确恢复；不修改无关 Claude 偏好，也不会写入上游 Provider API Key。
 - 新增 Codex TOML 只读状态、可复制配置预览、确定性 catalog 同步和仅用于显示的 `OneLLMRouter` 来源标识。v1.5.0 不写入 `config.toml`，也不提供原始 TOML/catalog 编辑。
 - 新增 Windows、Linux、macOS 的 Go 与 Qt 构建/测试门禁。发行产物仍仅提供 Windows x64；Linux/macOS 安装包、开机自启、daemon 和应用重启集成未交付。
@@ -55,5 +55,6 @@
 - 修复托盘子进程退出、重启取消、启动失败、端口冲突、旧开机自启迁移和运行中安装升级。
 - 修复重试取消和超时边界，客户端断开或服务关闭时会及时停止待处理工作，且不会生成误导性的上游错误。
 
+[1.5.0]: https://github.com/kkroid/OneLLMRouter/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/kkroid/OneLLMRouter/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/kkroid/OneLLMRouter/compare/v1.3.2...v1.4.0

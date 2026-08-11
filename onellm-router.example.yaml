@@ -77,9 +77,9 @@ providers:
   #   api_key: "sk-your-78code-key"
   #   proxy: true
   #   models:
-  #     - "claude-fable-5"         # Anthropic + OpenAI 双端点
-  #     - "claude-opus-4-8"        # Anthropic + OpenAI 双端点
-  #     - "gpt-5.6-sol"            # 仅 OpenAI 端点（Codex CLI）
+  #     - "claude-fable-5"
+  #     - "claude-opus-4-8"
+  #     - "gpt-5.6-sol"
 
   # 添加更多 provider：
   # - name: "My API"
@@ -89,7 +89,7 @@ providers:
   #   models: ["model-a", "model-b"]
 
 # Claude Code 模型槽位 — 每个槽位指定 provider_prefix/model
-# 启动时打印到控制台，复制到 Claude Code settings.json 即可
+# 可在桌面端 Clients 页面通过 Core 受控写入 Claude Code settings.json
 model_slots:
   default: "ds/deepseek-v4-pro[1m]"
   opus: "ds/deepseek-v4-pro[1m]"
