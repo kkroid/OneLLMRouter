@@ -18,20 +18,23 @@ Two distributions are available:
 ## Architecture
 
 ```text
-Claude Code CLI           OpenAI-compatible tools
-Anthropic API             Chat Completions / Responses
-       |                            |
-       v                            v
- /anthropic/v1/*             /openai/v1/*
-       |                            |
-       +-------------+--------------+
-                     v
-             onellm-router (Go)
-              routing, protocol
-             translation, retries
-                     |
-                     v
-            configured providers
+Claude Code          OpenAI-compatible tools       Codex
+Anthropic Messages   Chat Completions              Responses
+       |                    |                         |
+       v                    v                         v
+/anthropic/v1/messages  /openai/v1/chat/completions  /openai/v1/responses
+       |                    |                         |
+       +--------------+-----+--------------+----------+
+                      v
+           +------------------------------+
+           |      onellm-router (Go)      |
+           | routing, proxy, retry, usage |
+           | Messages <-> Chat Completions|
+           | Responses passthrough        |
+           +------------------------------+
+                      |
+                      v
+             configured providers
 ```
 
 The translation layer uses a compact internal representation before emitting Anthropic or OpenAI payloads. This keeps text, images, tool calls, and streaming events consistent across protocols.

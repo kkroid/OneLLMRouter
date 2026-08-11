@@ -15,20 +15,23 @@
 ## 架构
 
 ```
-Claude Code CLI     OpenAI 兼容工具
-(Anthropic API)     (OpenAI API)
-       │                  │
-       ▼                  ▼
- /anthropic/v1/*    /openai/v1/*
-       │                  │
-       └──────┬───────────┘
-              ▼
-    ┌─────────────────────────┐
-    │   onellm-router (Go)     │  ← 单二进制守护进程
-    │   · HTTP proxy          │
-    │   · 协议翻译             │
-    │   · Anthropic ↔ OpenAI  │
-    └─────────────────────────┘
+Claude Code          OpenAI 兼容工具              Codex
+Anthropic Messages   Chat Completions             Responses
+       │                    │                         │
+       ▼                    ▼                         ▼
+/anthropic/v1/messages  /openai/v1/chat/completions  /openai/v1/responses
+       │                    │                         │
+       └──────────────┬─────┴──────────────┬──────────┘
+                      ▼
+           ┌──────────────────────────────┐
+           │      onellm-router (Go)      │  ← 单二进制守护进程
+           │  · 路由、代理、重试、Usage    │
+           │  · Messages ↔ Chat Completions│
+           │  · Responses 直通             │
+           └──────────────────────────────┘
+                      │
+                      ▼
+              已配置的 Providers
 ```
 
 协议翻译层采用轻量 Core IR：先将 Anthropic Messages 或 OpenAI Chat Completions 映射到内部中间表示，再输出目标协议，便于稳定处理文本、图片、工具调用和流式事件。
