@@ -7,7 +7,7 @@ struct Strings {
     QString stopped, starting, healthy, degraded, conflict, error;
     QString modelsPort, proxy, proxyUnknown, proxyDisabled, reachable, unreachable;
     QString start, stop, restart, externallyManaged, gracefulStopTimedOut;
-    QString openConfig, openLogs, autoStart, quit;
+    QString providerConfiguration, openConfig, openLogs, autoStart, quit;
 };
 
 inline Strings stringsForLocale(const QLocale &locale)
@@ -24,6 +24,7 @@ inline Strings stringsForLocale(const QLocale &locale)
             QString::fromUtf8("启动路由器"), QString::fromUtf8("停止路由器"),
             QString::fromUtf8("重启路由器"), QString::fromUtf8("由其他进程管理"),
             QString::fromUtf8("优雅停止超时"),
+            QString::fromUtf8("Provider 配置"),
             QString::fromUtf8("打开配置"), QString::fromUtf8("打开日志"),
             QString::fromUtf8("登录时启动"), QString::fromUtf8("退出"),
         };
@@ -35,7 +36,7 @@ inline Strings stringsForLocale(const QLocale &locale)
         "Reachable", "Unreachable",
         "Start Router", "Stop Router", "Restart Router",
         "Managed by another process", "Graceful stop timed out",
-        "Open Configuration", "Open Logs",
+        "Provider Configuration", "Open Configuration", "Open Logs",
         "Start on login", "Quit",
     };
 }

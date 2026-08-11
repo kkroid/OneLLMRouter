@@ -2,10 +2,7 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QProcess>
-#include <QUrl>
 
 namespace {
 
@@ -29,18 +26,17 @@ ConfigResult validationResult(const QJsonObject &object)
     return result;
 }
 
-QString endpoint(const ProviderConfigSnapshot &provider, ModelProtocol protocol)
+QString protocolArgument(ModelProtocol protocol)
 {
-    QString base;
-    QString suffix = "/models";
-    if (protocol == ModelProtocol::Anthropic) base = provider.baseUrl;
-    if (protocol == ModelProtocol::OpenAIChat) base = provider.openAIBaseUrl;
-    if (protocol == ModelProtocol::OpenAIResponses) {
-        base = provider.responsesBaseUrl;
-        suffix = "/v1/models";
+    switch (protocol) {
+    case ModelProtocol::Anthropic:
+        return "anthropic";
+    case ModelProtocol::OpenAIChat:
+        return "openai";
+    case ModelProtocol::OpenAIResponses:
+        return "responses";
     }
-    while (base.endsWith('/')) base.chop(1);
-    return base.isEmpty() ? QString() : base + suffix;
+    return {};
 }
 
 } // namespace
@@ -217,44 +213,55 @@ ConfigResult ConfigClient::apply(const ConfigSnapshot &snapshot,
     return result.succeeded ? validationResult(output) : result;
 }
 
-void ConfigClient::discoverModels(const ProviderConfigSnapshot &provider,
-                                  ModelProtocol protocol, const QString &apiKey)
+void ConfigClient::discoverModels(const ConfigSnapshot &snapshot,
+                                  int providerIndex, ModelProtocol protocol,
+                                  const QMap<int, QString> &apiKeys)
 {
-    const QString url = endpoint(provider, protocol);
-    if (url.isEmpty()) {
-        emit discoveryFailed(provider.prefix,
-                             "The selected protocol has no Base URL");
+    if (providerIndex < 0 || providerIndex >= snapshot.providers.size()) {
+        emit discoveryFailed({}, "Provider is no longer available");
         return;
     }
-    QNetworkRequest request{QUrl(url)};
-    if (!apiKey.isEmpty()) {
-        if (protocol == ModelProtocol::Anthropic)
-            request.setRawHeader("x-api-key", apiKey.toUtf8());
-        else
-            request.setRawHeader("Authorization", "Bearer " + apiKey.toUtf8());
-    }
-    QNetworkReply *reply = m_network.get(request);
-    const QString providerPrefix = provider.prefix;
-    connect(reply, &QNetworkReply::finished, this,
-            [this, reply, providerPrefix] {
-        const QByteArray payload = reply->readAll();
-        if (reply->error() != QNetworkReply::NoError) {
-            reply->deleteLater();
-            emit discoveryFailed(providerPrefix, "Model discovery failed");
+    const QString providerPrefix = snapshot.providers[providerIndex].prefix;
+    const QByteArray input = serialize(snapshot, apiKeys);
+    auto *process = new QProcess(this);
+    const QStringList arguments{
+        "--config", m_configPath, "config-discover-models", "--stdin-json",
+        "--provider-index", QString::number(providerIndex),
+        "--protocol", protocolArgument(protocol),
+    };
+    connect(process, &QProcess::started, process, [process, input] {
+        process->write(input);
+        process->closeWriteChannel();
+    });
+    connect(process, &QProcess::errorOccurred, this,
+            [this, process, providerPrefix](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return;
+        emit discoveryFailed(providerPrefix, "Core command could not start");
+        process->deleteLater();
+    });
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this, [this, process, providerPrefix](int exitCode,
+                                                  QProcess::ExitStatus exitStatus) {
+        const QByteArray payload = process->readAllStandardOutput();
+        process->deleteLater();
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(payload, &parseError);
+        if (exitStatus != QProcess::NormalExit || exitCode != 0 ||
+            parseError.error != QJsonParseError::NoError || !document.isObject()) {
+            emit discoveryFailed(providerPrefix, "Core returned invalid model discovery data");
             return;
         }
-        const QJsonObject object = QJsonDocument::fromJson(payload).object();
-        QStringList models;
-        const QJsonArray values = object.contains("data")
-            ? object.value("data").toArray() : object.value("models").toArray();
-        for (const QJsonValue &value : values) {
-            const QJsonObject model = value.toObject();
-            const QString identifier = model.value("id").toString(model.value("slug").toString());
-            if (!identifier.isEmpty()) models.append(identifier);
+        const QJsonObject object = document.object();
+        if (!object.value("ok").toBool()) {
+            emit discoveryFailed(providerPrefix,
+                                 object.value("error").toString("Model discovery failed"));
+            return;
         }
-        models.removeDuplicates();
-        models.sort();
-        reply->deleteLater();
-        emit modelsDiscovered(providerPrefix, models);
+        QStringList models;
+        for (const QJsonValue &value : object.value("models").toArray())
+            models.append(value.toString());
+        emit modelsDiscovered(object.value("provider").toString(providerPrefix),
+                              models);
     });
+    process->start(m_executable, arguments);
 }

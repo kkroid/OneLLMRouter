@@ -83,6 +83,7 @@ Anthropic and OpenAI API endpoints.`,
 	rootCmd.AddCommand(configGetCmd())
 	rootCmd.AddCommand(configValidateCmd())
 	rootCmd.AddCommand(configApplyCmd())
+	rootCmd.AddCommand(configDiscoverModelsCmd())
 	rootCmd.AddCommand(statsCmd())
 	rootCmd.AddCommand(clientCmd())
 	rootCmd.AddCommand(&cobra.Command{

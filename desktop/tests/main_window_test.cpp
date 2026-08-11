@@ -10,6 +10,7 @@
 #include <QTemporaryDir>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTabWidget>
 
 #include "main_window.h"
 
@@ -19,11 +20,12 @@ class MainWindowTest : public QObject
 private slots:
     void externalCoreIsReadOnly();
     void apiKeyEditorIsPasswordOnly();
+    void modelsAreManagedOnProviderPage();
+    void editsPersistAcrossProviderSwitchAndRequestRestart();
     void validationErrorKeepsEditorOpen();
-    void discoveryStaysWithInitiatingProvider();
+    void discoveryLocksProviderAndReportsMerge();
     void noOpSavePreservesReasoningModels();
-    void userReasoningEditsTrimAndClear();
-    void existingKeyMustBeReenteredForDiscovery();
+    void existingKeyIsUsedForDiscovery();
     void claudeApplySavesSelectedSlotFirst();
     void claudeApplyStopsOnValidationFailure();
 };
@@ -57,6 +59,14 @@ static QByteArray clientTestConfig()
            "  haiku: alpha/old-model\n  fable: alpha/old-model\n";
 }
 
+static void replaceText(QLineEdit *editor, const QString &text)
+{
+    editor->setFocus();
+    editor->selectAll();
+    if (text.isEmpty()) QTest::keyClick(editor, Qt::Key_Backspace);
+    else QTest::keyClicks(editor, text);
+}
+
 void MainWindowTest::externalCoreIsReadOnly()
 {
     ConfigClient client("missing-core", "missing.yaml");
@@ -67,7 +77,7 @@ void MainWindowTest::externalCoreIsReadOnly()
     auto *status = window.findChild<QLabel *>("statusLabel");
     QVERIFY(status->text().contains("read-only"));
     window.setReadOnly(false);
-    QVERIFY(save->isEnabled());
+    QVERIFY(!save->isEnabled());
     QVERIFY(status->text().isEmpty());
 }
 
@@ -79,6 +89,65 @@ void MainWindowTest::apiKeyEditorIsPasswordOnly()
     QVERIFY(key);
     QCOMPARE(key->echoMode(), QLineEdit::Password);
     QVERIFY(key->text().isEmpty());
+}
+
+void MainWindowTest::modelsAreManagedOnProviderPage()
+{
+    ConfigClient client("missing-core", "missing.yaml");
+    MainWindow window(&client);
+    auto *tabs = window.findChild<QTabWidget *>("configurationTabs");
+    auto *models = window.findChild<QListWidget *>("modelList");
+    auto *discover = window.findChild<QPushButton *>("discoverModels");
+    auto *modelsLabel = window.findChild<QLabel *>("configuredModelsLabel");
+    QVERIFY(tabs && models && discover && modelsLabel);
+    QCOMPARE(tabs->count(), 3);
+    QCOMPARE(tabs->tabText(0), QString("Providers"));
+    QVERIFY(tabs->widget(0)->isAncestorOf(models));
+    QVERIFY(tabs->widget(0)->isAncestorOf(discover));
+    QCOMPARE(discover->text(), QString("Discover Models"));
+    QCOMPARE(modelsLabel->text(), QString("Configured Models"));
+    QVERIFY(!window.findChild<QPushButton *>("updateProvider"));
+}
+
+void MainWindowTest::editsPersistAcrossProviderSwitchAndRequestRestart()
+{
+    const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
+    QVERIFY2(!core.isEmpty(), "CMake must configure ONELLM_TEST_CORE");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath("router.yaml");
+    QFile config(path);
+    QVERIFY(config.open(QIODevice::WriteOnly));
+    config.write("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
+                 "  - {name: Alpha, prefix: alpha, base_url: https://alpha.invalid, api_key: alpha-key, models: [a]}\n"
+                 "  - {name: Beta, prefix: beta, base_url: https://beta.invalid, api_key: beta-key, models: [b]}\n"
+                 "codex:\n  models: {}\nmodel_slots: {}\n");
+    config.close();
+
+    ConfigClient client(core, path);
+    MainWindow window(&client);
+    QSignalSpy restart(&window, &MainWindow::restartRequested);
+    auto *providers = window.findChild<QListWidget *>("providerList");
+    auto *name = window.findChild<QLineEdit *>("providerName");
+    auto *dirty = window.findChild<QLabel *>("dirtyLabel");
+    auto *save = window.findChild<QPushButton *>("saveConfig");
+    QVERIFY(providers && name && dirty && save);
+    QVERIFY(!save->isEnabled());
+
+    replaceText(name, "Alpha Updated");
+    QVERIFY(!dirty->isHidden());
+    QVERIFY(save->isEnabled());
+    providers->setCurrentRow(1);
+    providers->setCurrentRow(0);
+    QCOMPARE(name->text(), QString("Alpha Updated"));
+
+    QTest::mouseClick(save, Qt::LeftButton);
+    QCOMPARE(restart.count(), 1);
+    QVERIFY(!dirty->isVisible());
+    QVERIFY(!save->isEnabled());
+    QFile saved(path);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    QVERIFY(saved.readAll().contains("Alpha Updated"));
 }
 
 void MainWindowTest::validationErrorKeepsEditorOpen()
@@ -104,8 +173,9 @@ void MainWindowTest::validationErrorKeepsEditorOpen()
     auto *openAIUrl = window.findChild<QLineEdit *>("openAIBaseUrl");
     auto *responsesUrl = window.findChild<QLineEdit *>("responsesBaseUrl");
     QVERIFY(baseUrl && openAIUrl && responsesUrl);
-    baseUrl->clear(); openAIUrl->clear(); responsesUrl->clear();
-    QTest::mouseClick(window.findChild<QPushButton *>("updateProvider"), Qt::LeftButton);
+    replaceText(baseUrl, {});
+    replaceText(openAIUrl, {});
+    replaceText(responsesUrl, {});
     QTest::mouseClick(window.findChild<QPushButton *>("saveConfig"), Qt::LeftButton);
 
     QVERIFY(window.isVisible());
@@ -115,7 +185,7 @@ void MainWindowTest::validationErrorKeepsEditorOpen()
     QCOMPARE(unchanged.readAll(), original);
 }
 
-void MainWindowTest::discoveryStaysWithInitiatingProvider()
+void MainWindowTest::discoveryLocksProviderAndReportsMerge()
 {
     const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
     QVERIFY2(!core.isEmpty(), "CMake must configure ONELLM_TEST_CORE");
@@ -139,8 +209,8 @@ void MainWindowTest::discoveryStaysWithInitiatingProvider()
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write(QString("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
-                       "  - {name: Alpha, prefix: alpha, base_url: 'http://127.0.0.1:%1', models: [old-a]}\n"
-                       "  - {name: Beta, prefix: beta, base_url: https://beta.invalid, models: [old-b]}\n"
+                       "  - {name: Alpha, prefix: alpha, base_url: 'http://127.0.0.1:%1', proxy: false, models: [old-a]}\n"
+                       "  - {name: Beta, prefix: beta, base_url: https://beta.invalid, proxy: false, models: [old-b]}\n"
                        "codex:\n  models: {}\nmodel_slots: {}\n")
                    .arg(server.serverPort()).toUtf8());
     file.close();
@@ -152,10 +222,9 @@ void MainWindowTest::discoveryStaysWithInitiatingProvider()
     auto *status = window.findChild<QLabel *>("statusLabel");
     QCOMPARE(providers->currentRow(), 0);
     QTest::mouseClick(window.findChild<QPushButton *>("discoverModels"), Qt::LeftButton);
-    providers->setCurrentRow(1);
-    QTRY_VERIFY_WITH_TIMEOUT(status->text().contains("Discovered"), 3000);
-    QCOMPARE(models->findItems("discovered-a", Qt::MatchExactly).size(), 0);
-    providers->setCurrentRow(0);
+    QVERIFY(!providers->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().contains("Found 1 models; added 1"), 3000);
+    QVERIFY(providers->isEnabled());
     QCOMPARE(models->findItems("discovered-a", Qt::MatchExactly).size(), 1);
 }
 
@@ -191,61 +260,45 @@ void MainWindowTest::noOpSavePreservesReasoningModels()
     QVERIFY(!reloaded.codexModels.contains("plain-model"));
 }
 
-void MainWindowTest::userReasoningEditsTrimAndClear()
-{
-    const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
-    QVERIFY2(!core.isEmpty(), "CMake must configure ONELLM_TEST_CORE");
-    QTemporaryDir directory;
-    const QString path = directory.filePath("router.yaml");
-    QFile file(path);
-    QVERIFY(file.open(QIODevice::WriteOnly));
-    file.write("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
-               "  - {name: Alpha, prefix: alpha, base_url: https://alpha.invalid, models: [reasoning-model]}\n"
-               "codex:\n  models:\n    reasoning-model:\n      default_reasoning_level: medium\n"
-               "      supported_reasoning_levels: [low, medium]\nmodel_slots: {}\n");
-    file.close();
-    ConfigClient client(core, path);
-    MainWindow window(&client);
-    auto *defaultReasoning = window.findChild<QLineEdit *>("defaultReasoning");
-    auto *supportedReasoning = window.findChild<QLineEdit *>("supportedReasoning");
-    defaultReasoning->selectAll();
-    QTest::keyClick(defaultReasoning, Qt::Key_Backspace);
-    supportedReasoning->selectAll();
-    QTest::keyClicks(supportedReasoning, " low, medium , ");
-    QVERIFY(QMetaObject::invokeMethod(&window, "save", Qt::DirectConnection));
-    ConfigSnapshot reloaded;
-    QVERIFY(client.load(&reloaded).succeeded);
-    QCOMPARE(reloaded.codexModels.value("reasoning-model").defaultLevel,
-             QString());
-    QCOMPARE(reloaded.codexModels.value("reasoning-model").supportedLevels,
-             QStringList({"low", "medium"}));
-}
-
-void MainWindowTest::existingKeyMustBeReenteredForDiscovery()
+void MainWindowTest::existingKeyIsUsedForDiscovery()
 {
     const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
     QVERIFY2(!core.isEmpty(), "CMake must configure ONELLM_TEST_CORE");
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost));
+    QByteArray request;
+    connect(&server, &QTcpServer::newConnection, &server, [&] {
+        QTcpSocket *socket = server.nextPendingConnection();
+        connect(socket, &QTcpSocket::readyRead, socket, [&, socket] {
+            request += socket->readAll();
+            if (!request.contains("\r\n\r\n")) return;
+            const QByteArray body = "{\"data\":[{\"id\":\"discovered-model\"}]}";
+            socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                          + QByteArray::number(body.size())
+                          + "\r\nConnection: close\r\n\r\n" + body);
+            socket->disconnectFromHost();
+        });
+    });
     QTemporaryDir directory;
     const QString path = directory.filePath("router.yaml");
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write(QString("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
                        "  - name: Alpha\n    prefix: alpha\n    base_url: http://127.0.0.1:%1\n"
-                       "    api_key: existing-secret\n    models: [model]\ncodex:\n  models: {}\nmodel_slots: {}\n")
+                       "    api_key: existing-secret\n    proxy: false\n    models: [model]\n"
+                       "codex:\n  models: {}\nmodel_slots: {}\n")
                    .arg(server.serverPort()).toUtf8());
     file.close();
     ConfigClient client(core, path);
     QSignalSpy discovery(&client, &ConfigClient::modelsDiscovered);
     MainWindow window(&client);
     QTest::mouseClick(window.findChild<QPushButton *>("discoverModels"), Qt::LeftButton);
-    QCOMPARE(discovery.count(), 0);
-    QTest::qWait(100);
-    QVERIFY(!server.hasPendingConnections());
-    const QString message = window.findChild<QLabel *>("statusLabel")->text();
-    QVERIFY(message.contains("Re-enter"));
-    QVERIFY(!message.contains("existing-secret"));
+    QVERIFY(discovery.wait(3000));
+    QVERIFY(request.toLower().contains("x-api-key: existing-secret"));
+    QCOMPARE(window.findChild<QLabel *>("statusLabel")->text(),
+             QString("Found 1 models; added 1. Save to apply."));
+    QCOMPARE(window.findChild<QListWidget *>("modelList")
+                 ->findItems("discovered-model", Qt::MatchExactly).size(), 1);
 }
 
 void MainWindowTest::claudeApplySavesSelectedSlotFirst()
@@ -299,9 +352,9 @@ void MainWindowTest::claudeApplyStopsOnValidationFailure()
 
     ConfigClient client(core, path);
     MainWindow window(&client);
-    window.findChild<QLineEdit *>("anthropicBaseUrl")->clear();
-    window.findChild<QLineEdit *>("openAIBaseUrl")->clear();
-    window.findChild<QLineEdit *>("responsesBaseUrl")->clear();
+    replaceText(window.findChild<QLineEdit *>("anthropicBaseUrl"), {});
+    replaceText(window.findChild<QLineEdit *>("openAIBaseUrl"), {});
+    replaceText(window.findChild<QLineEdit *>("responsesBaseUrl"), {});
     QTest::mouseClick(window.findChild<QPushButton *>("claudeApply"), Qt::LeftButton);
 
     QVERIFY(settings.open(QIODevice::ReadOnly));

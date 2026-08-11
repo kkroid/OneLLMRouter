@@ -51,6 +51,7 @@ public:
 private slots:
     void stopOwned();
     void openMainWindow();
+    void restartAfterConfigurationSave();
 
 private:
     void rebuildMenu();

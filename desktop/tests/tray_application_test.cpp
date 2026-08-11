@@ -138,6 +138,8 @@ void TrayApplicationTest::selectsEnglishAndChineseStrings()
     QCOMPARE(english.proxyDisabled, QString("Proxy: Not configured"));
     QCOMPARE(english.gracefulStopTimedOut,
              QString("Graceful stop timed out"));
+    QCOMPARE(english.providerConfiguration,
+             QString("Provider Configuration"));
 
     const Strings chinese = stringsForLocale(QLocale(QLocale::Chinese));
     QCOMPARE(chinese.quit, QString::fromUtf8("退出"));
@@ -145,6 +147,8 @@ void TrayApplicationTest::selectsEnglishAndChineseStrings()
     QCOMPARE(chinese.proxyDisabled, QString::fromUtf8("代理：未配置"));
     QCOMPARE(chinese.gracefulStopTimedOut,
              QString::fromUtf8("优雅停止超时"));
+    QCOMPARE(chinese.providerConfiguration,
+             QString::fromUtf8("Provider 配置"));
 }
 
 void TrayApplicationTest::distinguishesUnknownAndDisabledProxy()
@@ -213,13 +217,18 @@ void TrayApplicationTest::rebuildsMenuWhenAboutToShow()
 
     bool foundStart = false;
     bool foundCopilot = false;
+    QAction *configuration = nullptr;
     for (QAction *action : tray.menu()->actions()) {
         foundStart = foundStart || action->objectName() == "startRouter";
         foundCopilot = foundCopilot ||
                        action->text().contains("Copilot", Qt::CaseInsensitive);
+        if (action->objectName() == "openMainWindow") configuration = action;
     }
     QVERIFY(foundStart);
     QVERIFY(!foundCopilot);
+    QVERIFY(configuration);
+    QCOMPARE(configuration->text(),
+             stringsForLocale(QLocale::system()).providerConfiguration);
 }
 
 void TrayApplicationTest::detachedExternalBecomesControllableStoppedState()

@@ -219,7 +219,7 @@ void TrayApplication::rebuildMenu()
     if (policy.stop) connect(m_menu.addAction(m_strings.stop), &QAction::triggered,
                              this, &TrayApplication::stopOwned);
     m_menu.addSeparator();
-    QAction *configuration = m_menu.addAction("Providers and Models");
+    QAction *configuration = m_menu.addAction(m_strings.providerConfiguration);
     configuration->setObjectName("openMainWindow");
     connect(configuration, &QAction::triggered, this, &TrayApplication::openMainWindow);
     connect(m_menu.addAction(m_strings.openConfig), &QAction::triggered, this,
@@ -245,6 +245,8 @@ void TrayApplication::openMainWindow()
         m_mainWindow = new MainWindow(client,
             m_process.ownership() == ProcessOwnership::External);
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
+        connect(m_mainWindow, &MainWindow::restartRequested,
+                this, &TrayApplication::restartAfterConfigurationSave);
         connect(m_mainWindow, &QObject::destroyed, this, [this] { m_mainWindow = nullptr; });
     } else {
         m_mainWindow->setReadOnly(m_process.ownership() == ProcessOwnership::External);
@@ -266,6 +268,15 @@ void TrayApplication::stopOwned()
 {
     m_autoStartAllowed = false;
     m_process.requestGracefulStop();
+}
+
+void TrayApplication::restartAfterConfigurationSave()
+{
+    if (m_process.ownership() == ProcessOwnership::Owned) {
+        m_process.restart();
+    } else if (m_process.ownership() == ProcessOwnership::None) {
+        startOwned();
+    }
 }
 
 void TrayApplication::setState(RouterState state, const QString &detail)

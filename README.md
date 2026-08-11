@@ -289,7 +289,7 @@ onellm-router stats month    # 查看 UTC 月 Token Usage
 
 ### 桌面配置与 Usage
 
-Qt 桌面提供 Providers、Models、Clients 和 Usage 页面。Provider/模型修改由 Core 校验并原子写回，旧 API Key 不会显示，保存后需要重启 Core 生效；附着到外部 Core 时保持只读。Clients 页面提供上述 Claude 受控合并/恢复和 Codex 只读状态/预览/catalog 同步；Usage 页面直接读取 Core 的日/周/月统计，不自行聚合 JSONL。v1.5.0 不提供 MCP、Skill、Prompt 管理、Auto Failover、原始客户端文件编辑器或无关偏好编辑器。
+Qt 桌面提供 Providers、Clients 和 Usage 页面，模型配置与手动发现位于对应 Provider 下。Provider/模型修改会立即进入界面草稿，由 Core 校验并原子写回；旧 API Key 不会显示，保存后托盘会优雅重启其持有的 Core，附着到外部 Core 时保持只读。Clients 页面提供上述 Claude 受控合并/恢复和 Codex 只读状态/预览/catalog 同步；Usage 页面直接读取 Core 的日/周/月统计，不自行聚合 JSONL。v1.5.0 不提供 MCP、Skill、Prompt 管理、Auto Failover、原始客户端文件编辑器或无关偏好编辑器。
 
 ### 平台能力矩阵
 

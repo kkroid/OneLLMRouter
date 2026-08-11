@@ -179,6 +179,8 @@ void ConfigClientTest::discoversProtocolModels()
     QFETCH(ModelProtocol, protocol);
     QFETCH(QString, path);
     QFETCH(QByteArray, authHeader);
+    const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
+    QVERIFY2(!core.isEmpty(), "CMake must configure ONELLM_TEST_CORE");
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost));
     QByteArray request;
@@ -194,22 +196,37 @@ void ConfigClientTest::discoversProtocolModels()
         });
     });
     const QString base = QString("http://127.0.0.1:%1").arg(server.serverPort());
-    ProviderConfigSnapshot provider;
-    provider.baseUrl = base;
-    provider.openAIBaseUrl = base;
-    provider.responsesBaseUrl = base;
-    ConfigClient client("unused", "unused");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString configPath = directory.filePath("router.yaml");
+    QFile config(configPath);
+    QVERIFY(config.open(QIODevice::WriteOnly));
+    const QByteArray original = QString(
+        "server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
+        "  - name: Alpha\n    prefix: alpha\n    base_url: %1\n"
+        "    openai_base_url: %1\n    responses_base_url: %1\n"
+        "    api_key: replacement-key\n    proxy: false\n"
+        "    models: [configured-model]\ncodex:\n  models: {}\nmodel_slots: {}\n")
+        .arg(base).toUtf8();
+    config.write(original);
+    config.close();
+    ConfigClient client(core, configPath);
+    ConfigSnapshot snapshot;
+    QVERIFY(client.load(&snapshot).succeeded);
     QSignalSpy success(&client, &ConfigClient::modelsDiscovered);
     QSignalSpy failure(&client, &ConfigClient::discoveryFailed);
-    client.discoverModels(provider, protocol, "replacement-key");
+    client.discoverModels(snapshot, 0, protocol);
     QVERIFY(success.wait(3000));
     QCOMPARE(failure.count(), 0);
     const QList<QVariant> result = success.takeFirst();
-    QCOMPARE(result.at(0).toString(), QString());
+    QCOMPARE(result.at(0).toString(), QString("alpha"));
     QCOMPARE(result.at(1).toStringList(), QStringList({"model-a", "model-b"}));
     const QByteArray lowerRequest = request.toLower();
     QVERIFY(lowerRequest.startsWith("get " + path.toUtf8().toLower() + " http/1.1"));
     QVERIFY(lowerRequest.contains(authHeader.toLower()));
+    QFile unchanged(configPath);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), original);
 }
 
 QTEST_MAIN(ConfigClientTest)

@@ -7,6 +7,7 @@
 #include <QMainWindow>
 
 class QComboBox;
+class QCloseEvent;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -22,9 +23,15 @@ public:
                         UsageClient *usageClient = nullptr);
     void setReadOnly(bool readOnly);
 
+signals:
+    void restartRequested();
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private slots:
     void selectProvider(int row);
-    void saveProvider();
+    void updateCurrentProvider();
     void addProvider();
     void removeProvider();
     void addModel();
@@ -38,16 +45,21 @@ private:
     void load();
     void refreshProviders();
     void refreshModels();
-    void refreshReasoning();
+    void refreshDraftConsumers();
+    void setDirty(bool dirty);
+    void setDiscoveryInProgress(bool inProgress);
+    void updateActionState();
     void showResult(const ConfigResult &result);
     ConfigResult saveConfiguration();
-    void finishSuccessfulSave();
+    void finishSuccessfulSave(const QString &message);
     QMap<int, QString> pendingKeys() const;
 
     ConfigClient *m_client;
     UsageClient *m_usageClient;
     ConfigSnapshot m_snapshot;
     bool m_readOnly = false;
+    bool m_dirty = false;
+    bool m_discoveryInProgress = false;
     QTabWidget *m_tabs;
     QListWidget *m_providerList;
     QListWidget *m_modelList;
@@ -60,10 +72,10 @@ private:
     QComboBox *m_proxy;
     QComboBox *m_protocol;
     QLineEdit *m_modelName;
-    QLineEdit *m_defaultReasoning;
-    QLineEdit *m_supportedReasoning;
     ClientsPage *m_clientsPage;
     QLabel *m_status;
+    QLabel *m_dirtyLabel;
+    QPushButton *m_discover;
     QPushButton *m_save;
     QList<QWidget *> m_editControls;
     QMap<int, QString> m_apiKeys;

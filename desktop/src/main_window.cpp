@@ -1,12 +1,14 @@
 #include "main_window.h"
 #include "platform/platform.h"
 
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTabWidget>
@@ -19,16 +21,6 @@ QPushButton *button(const QString &text, const QString &name, QWidget *parent)
     auto *result = new QPushButton(text, parent);
     result->setObjectName(name);
     return result;
-}
-
-QStringList reasoningLevels(const QString &text)
-{
-    QStringList levels;
-    for (const QString &part : text.split(',', Qt::SkipEmptyParts)) {
-        const QString level = part.trimmed();
-        if (!level.isEmpty()) levels.append(level);
-    }
-    return levels;
 }
 
 } // namespace
@@ -47,11 +39,12 @@ MainWindow::MainWindow(ConfigClient *client, bool readOnly, QWidget *parent,
 
 void MainWindow::buildUi()
 {
-    setWindowTitle("OneLLMRouter Configuration");
+    setWindowTitle("OneLLMRouter Configuration[*]");
     resize(850, 560);
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
     m_tabs = new QTabWidget(central);
+    m_tabs->setObjectName("configurationTabs");
 
     auto *providersPage = new QWidget(m_tabs);
     auto *providersLayout = new QHBoxLayout(providersPage);
@@ -81,33 +74,32 @@ void MainWindow::buildUi()
     form->addRow("OpenAI Chat Base URL", m_openAIBaseUrl);
     form->addRow("OpenAI Responses Base URL", m_responsesBaseUrl);
     form->addRow("API Key", m_apiKey); form->addRow("Proxy", m_proxy);
-    QPushButton *update = button("Update Provider", "updateProvider", providersPage);
-    form->addRow(update);
-    providersLayout->addLayout(form, 2);
-    m_tabs->addTab(providersPage, "Providers");
-
-    auto *modelsPage = new QWidget(m_tabs);
-    auto *modelsLayout = new QVBoxLayout(modelsPage);
-    m_modelList = new QListWidget(modelsPage); m_modelList->setObjectName("modelList");
+    auto *modelsEditor = new QWidget(providersPage);
+    auto *modelsLayout = new QVBoxLayout(modelsEditor);
+    modelsLayout->setContentsMargins(0, 0, 0, 0);
+    m_modelList = new QListWidget(modelsEditor); m_modelList->setObjectName("modelList");
+    m_modelList->setMinimumHeight(100);
     modelsLayout->addWidget(m_modelList);
     auto *modelRow = new QHBoxLayout;
-    m_modelName = new QLineEdit(modelsPage); m_modelName->setObjectName("modelName");
+    m_modelName = new QLineEdit(modelsEditor); m_modelName->setObjectName("modelName");
     m_modelName->setPlaceholderText("Model ID");
-    QPushButton *addModelButton = button("Add", "addModel", modelsPage);
-    QPushButton *removeModelButton = button("Remove", "removeModel", modelsPage);
-    m_protocol = new QComboBox(modelsPage); m_protocol->setObjectName("discoveryProtocol");
-    m_protocol->addItems({"Anthropic", "OpenAI Chat", "OpenAI Responses"});
-    QPushButton *discover = button("Discover", "discoverModels", modelsPage);
+    QPushButton *addModelButton = button("Add", "addModel", modelsEditor);
+    QPushButton *removeModelButton = button("Remove", "removeModel", modelsEditor);
     modelRow->addWidget(m_modelName); modelRow->addWidget(addModelButton);
-    modelRow->addWidget(removeModelButton); modelRow->addWidget(m_protocol); modelRow->addWidget(discover);
+    modelRow->addWidget(removeModelButton);
     modelsLayout->addLayout(modelRow);
-    auto *reasoning = new QFormLayout;
-    m_defaultReasoning = new QLineEdit(modelsPage); m_defaultReasoning->setObjectName("defaultReasoning");
-    m_supportedReasoning = new QLineEdit(modelsPage); m_supportedReasoning->setObjectName("supportedReasoning");
-    reasoning->addRow("Default reasoning", m_defaultReasoning);
-    reasoning->addRow("Supported reasoning (comma separated)", m_supportedReasoning);
-    modelsLayout->addLayout(reasoning);
-    m_tabs->addTab(modelsPage, "Models");
+    auto *discoverRow = new QHBoxLayout;
+    m_protocol = new QComboBox(modelsEditor); m_protocol->setObjectName("discoveryProtocol");
+    m_protocol->addItems({"Anthropic", "OpenAI Chat", "OpenAI Responses"});
+    m_discover = button("Discover Models", "discoverModels", modelsEditor);
+    discoverRow->addWidget(m_protocol);
+    discoverRow->addWidget(m_discover);
+    modelsLayout->addLayout(discoverRow);
+    auto *modelsLabel = new QLabel("Configured Models", providersPage);
+    modelsLabel->setObjectName("configuredModelsLabel");
+    form->addRow(modelsLabel, modelsEditor);
+    providersLayout->addLayout(form, 2);
+    m_tabs->addTab(providersPage, "Providers");
 
     m_clientsPage = new ClientsPage(m_client, m_tabs);
     m_clientsPage->setObjectName("clientsPage");
@@ -119,37 +111,40 @@ void MainWindow::buildUi()
 
     layout->addWidget(m_tabs);
     m_status = new QLabel(central); m_status->setObjectName("statusLabel");
-    m_save = button("Validate and Save", "saveConfig", central);
-    layout->addWidget(m_status); layout->addWidget(m_save);
+    m_status->setWordWrap(true);
+    layout->addWidget(m_status);
+    auto *footer = new QHBoxLayout;
+    m_dirtyLabel = new QLabel("Unsaved changes", central);
+    m_dirtyLabel->setObjectName("dirtyLabel");
+    m_dirtyLabel->hide();
+    m_save = button("Save and Restart", "saveConfig", central);
+    footer->addWidget(m_dirtyLabel);
+    footer->addStretch();
+    footer->addWidget(m_save);
+    layout->addLayout(footer);
     setCentralWidget(central);
 
-    m_editControls = {add, remove, update, addModelButton, removeModelButton,
-                      discover, m_name, m_prefix, m_baseUrl, m_openAIBaseUrl,
+    m_editControls = {add, remove, addModelButton, removeModelButton,
+                      m_discover, m_name, m_prefix, m_baseUrl, m_openAIBaseUrl,
                       m_responsesBaseUrl, m_apiKey, m_proxy, m_modelName,
-                      m_protocol, m_defaultReasoning, m_supportedReasoning, m_save};
+                      m_protocol, m_save};
     connect(m_providerList, &QListWidget::currentRowChanged, this, &MainWindow::selectProvider);
     connect(add, &QPushButton::clicked, this, &MainWindow::addProvider);
     connect(remove, &QPushButton::clicked, this, &MainWindow::removeProvider);
-    connect(update, &QPushButton::clicked, this, &MainWindow::saveProvider);
     connect(addModelButton, &QPushButton::clicked, this, &MainWindow::addModel);
     connect(removeModelButton, &QPushButton::clicked, this, &MainWindow::removeModel);
-    connect(discover, &QPushButton::clicked, this, &MainWindow::discoverModels);
-    connect(m_modelList, &QListWidget::currentTextChanged, this, [this] { refreshReasoning(); });
-    connect(m_defaultReasoning, &QLineEdit::textEdited, this,
-            [this](const QString &text) {
-        if (m_modelList->currentItem())
-            m_snapshot.codexModels[m_modelList->currentItem()->text()].defaultLevel =
-                text;
-    });
-    connect(m_supportedReasoning, &QLineEdit::textEdited, this,
-            [this](const QString &text) {
-        if (m_modelList->currentItem())
-            m_snapshot.codexModels[m_modelList->currentItem()->text()].supportedLevels =
-                reasoningLevels(text);
-    });
+    connect(m_discover, &QPushButton::clicked, this, &MainWindow::discoverModels);
+    for (QLineEdit *editor : {m_name, m_prefix, m_baseUrl, m_openAIBaseUrl,
+                              m_responsesBaseUrl, m_apiKey}) {
+        connect(editor, &QLineEdit::textEdited,
+                this, &MainWindow::updateCurrentProvider);
+    }
+    connect(m_proxy, &QComboBox::activated,
+            this, &MainWindow::updateCurrentProvider);
     connect(m_clientsPage, &ClientsPage::modelSlotChanged, this,
             [this](const QString &slot, const QString &value) {
                 m_snapshot.modelSlots.insert(slot, value);
+                setDirty(true);
             });
     connect(m_clientsPage, &ClientsPage::claudeApplyRequested,
             this, &MainWindow::applyClaude);
@@ -163,14 +158,27 @@ void MainWindow::buildUi()
                 break;
             }
         }
-        if (row < 0) return;
-        for (const QString &model : models)
-            if (!m_snapshot.providers[row].models.contains(model)) m_snapshot.providers[row].models.append(model);
+        if (row < 0) {
+            setDiscoveryInProgress(false);
+            return;
+        }
+        int added = 0;
+        for (const QString &model : models) {
+            if (!m_snapshot.providers[row].models.contains(model)) {
+                m_snapshot.providers[row].models.append(model);
+                ++added;
+            }
+        }
         if (row == m_providerList->currentRow()) refreshModels();
-        m_status->setText(QString("Discovered %1 models").arg(models.size()));
+        refreshDraftConsumers();
+        if (added > 0) setDirty(true);
+        setDiscoveryInProgress(false);
+        m_status->setText(QString("Found %1 models; added %2. Save to apply.")
+                              .arg(models.size()).arg(added));
     });
     connect(m_client, &ConfigClient::discoveryFailed, this,
             [this](const QString &providerPrefix, const QString &message) {
+        setDiscoveryInProgress(false);
         for (const ProviderConfigSnapshot &provider : m_snapshot.providers) {
             if (provider.prefix == providerPrefix) {
                 m_status->setText(message);
@@ -184,17 +192,54 @@ void MainWindow::load()
 {
     const ConfigResult result = m_client->load(&m_snapshot);
     showResult(result);
-    if (result.succeeded) refreshProviders();
+    if (result.succeeded) {
+        refreshProviders();
+        setDirty(false);
+    }
 }
 
 void MainWindow::setReadOnly(bool readOnly)
 {
     m_readOnly = readOnly;
-    for (QWidget *control : m_editControls) control->setEnabled(!readOnly);
+    updateActionState();
     m_clientsPage->setReadOnly(readOnly);
     if (readOnly) m_status->setText("Externally managed Core: configuration is read-only");
     else if (m_status->text() == "Externally managed Core: configuration is read-only")
         m_status->clear();
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (!m_dirty) {
+        event->accept();
+        return;
+    }
+    if (m_readOnly) {
+        const QMessageBox::StandardButton choice = QMessageBox::warning(
+            this, "Unsaved Changes",
+            "The Core is externally managed. Discard unsaved changes?",
+            QMessageBox::Discard | QMessageBox::Cancel,
+            QMessageBox::Cancel);
+        if (choice == QMessageBox::Discard) event->accept();
+        else event->ignore();
+        return;
+    }
+    const QMessageBox::StandardButton choice = QMessageBox::warning(
+        this, "Unsaved Changes", "Save configuration changes before closing?",
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Save);
+    if (choice == QMessageBox::Cancel) {
+        event->ignore();
+        return;
+    }
+    if (choice == QMessageBox::Save) {
+        save();
+        if (m_dirty) {
+            event->ignore();
+            return;
+        }
+    }
+    event->accept();
 }
 
 void MainWindow::refreshProviders()
@@ -220,7 +265,7 @@ void MainWindow::selectProvider(int row)
     refreshModels();
 }
 
-void MainWindow::saveProvider()
+void MainWindow::updateCurrentProvider()
 {
     const int row = m_providerList->currentRow();
     if (row < 0) return;
@@ -231,7 +276,10 @@ void MainWindow::saveProvider()
     provider.proxy = ProviderConfigSnapshot::ProxyPolicy(m_proxy->currentIndex());
     if (m_apiKey->text().isEmpty()) m_apiKeys.remove(row);
     else m_apiKeys.insert(row, m_apiKey->text());
-    refreshProviders();
+    if (QListWidgetItem *item = m_providerList->item(row))
+        item->setText(provider.name.isEmpty() ? provider.prefix : provider.name);
+    refreshDraftConsumers();
+    setDirty(true);
 }
 
 void MainWindow::addProvider()
@@ -239,6 +287,7 @@ void MainWindow::addProvider()
     m_snapshot.providers.append(ProviderConfigSnapshot{});
     refreshProviders();
     m_providerList->setCurrentRow(m_snapshot.providers.size() - 1);
+    setDirty(true);
 }
 
 void MainWindow::removeProvider()
@@ -253,6 +302,7 @@ void MainWindow::removeProvider()
         m_apiKeys = shiftedKeys;
         m_snapshot.providers.removeAt(row);
         refreshProviders();
+        setDirty(true);
     }
 }
 
@@ -266,12 +316,42 @@ void MainWindow::refreshModels()
     if (m_modelList->count()) m_modelList->setCurrentRow(0);
 }
 
+void MainWindow::refreshDraftConsumers()
+{
+    m_clientsPage->setConfiguration(m_snapshot);
+}
+
+void MainWindow::setDirty(bool dirty)
+{
+    m_dirty = dirty;
+    setWindowModified(dirty);
+    m_dirtyLabel->setVisible(dirty);
+    updateActionState();
+}
+
+void MainWindow::setDiscoveryInProgress(bool inProgress)
+{
+    m_discoveryInProgress = inProgress;
+    m_discover->setText(inProgress ? "Discovering..." : "Discover Models");
+    m_providerList->setEnabled(!inProgress);
+    updateActionState();
+}
+
+void MainWindow::updateActionState()
+{
+    const bool editable = !m_readOnly && !m_discoveryInProgress;
+    for (QWidget *control : m_editControls) control->setEnabled(editable);
+    m_save->setEnabled(editable && m_dirty);
+}
+
 void MainWindow::addModel()
 {
     const int row = m_providerList->currentRow();
     const QString model = m_modelName->text().trimmed();
     if (row >= 0 && !model.isEmpty() && !m_snapshot.providers[row].models.contains(model)) {
         m_snapshot.providers[row].models.append(model); m_modelName->clear(); refreshModels();
+        refreshDraftConsumers();
+        setDirty(true);
     }
 }
 
@@ -281,29 +361,20 @@ void MainWindow::removeModel()
     if (provider >= 0 && m_modelList->currentRow() >= 0) {
         m_snapshot.providers[provider].models.removeAll(m_modelList->currentItem()->text());
         refreshModels();
+        refreshDraftConsumers();
+        setDirty(true);
     }
 }
 
 void MainWindow::discoverModels()
 {
-    saveProvider();
     const int row = m_providerList->currentRow();
     if (row < 0) return;
-    const ProviderConfigSnapshot &provider = m_snapshot.providers[row];
-    if (provider.apiKeySet && m_apiKey->text().isEmpty()) {
-        m_status->setText("Re-enter the API key to discover models");
-        return;
-    }
-    m_client->discoverModels(provider, ModelProtocol(m_protocol->currentIndex()),
-                             m_apiKey->text());
-}
-
-void MainWindow::refreshReasoning()
-{
-    const QString model = m_modelList->currentItem() ? m_modelList->currentItem()->text() : QString();
-    const CodexReasoningConfig config = m_snapshot.codexModels.value(model);
-    m_defaultReasoning->setText(config.defaultLevel);
-    m_supportedReasoning->setText(config.supportedLevels.join(','));
+    setDiscoveryInProgress(true);
+    m_status->setText("Discovering models...");
+    m_client->discoverModels(m_snapshot, row,
+                             ModelProtocol(m_protocol->currentIndex()),
+                             pendingKeys());
 }
 
 QMap<int, QString> MainWindow::pendingKeys() const
@@ -313,41 +384,46 @@ QMap<int, QString> MainWindow::pendingKeys() const
 
 void MainWindow::save()
 {
+    if (m_readOnly) return;
     const ConfigResult result = saveConfiguration();
     showResult(result);
-    if (result.succeeded) finishSuccessfulSave();
+    if (result.succeeded) {
+        finishSuccessfulSave("Configuration saved. Restarting Core...");
+        emit restartRequested();
+    }
 }
 
 ConfigResult MainWindow::saveConfiguration()
 {
-    saveProvider();
     const QMap<int, QString> keys = pendingKeys();
     ConfigResult result = m_client->validate(m_snapshot, keys);
     if (result.succeeded) result = m_client->apply(m_snapshot, keys);
     return result;
 }
 
-void MainWindow::finishSuccessfulSave()
+void MainWindow::finishSuccessfulSave(const QString &message)
 {
     m_apiKeys.clear();
     m_apiKey->clear();
-    m_status->setText("Configuration saved. Restart Core to apply changes.");
+    m_status->setText(message);
     ConfigSnapshot reloaded;
     if (m_client->load(&reloaded).succeeded) {
         m_snapshot = reloaded;
         refreshProviders();
-        m_status->setText("Configuration saved. Restart Core to apply changes.");
+        m_status->setText(message);
     }
+    setDirty(false);
 }
 
 void MainWindow::applyClaude()
 {
+    if (m_readOnly) return;
     const ConfigResult result = saveConfiguration();
     if (!result.succeeded) {
         m_clientsPage->showConfigurationError(result);
         return;
     }
-    finishSuccessfulSave();
+    finishSuccessfulSave("Configuration saved.");
     m_clientsPage->showClaudeResult(m_client->claudeApply());
 }
 

@@ -5,7 +5,6 @@
 #include <QJsonObject>
 #include <QList>
 #include <QMap>
-#include <QNetworkAccessManager>
 #include <QObject>
 #include <QStringList>
 
@@ -63,8 +62,9 @@ public:
     ClientCommandResult codexStatus() const;
     ClientCommandResult codexPreview(const QString &model) const;
     ClientCommandResult codexCatalogApply() const;
-    void discoverModels(const ProviderConfigSnapshot &provider,
-                        ModelProtocol protocol, const QString &apiKey = {});
+    void discoverModels(const ConfigSnapshot &snapshot, int providerIndex,
+                        ModelProtocol protocol,
+                        const QMap<int, QString> &apiKeys = {});
 
 signals:
     void modelsDiscovered(const QString &providerPrefix,
@@ -82,5 +82,4 @@ private:
 
     QString m_executable;
     QString m_configPath;
-    QNetworkAccessManager m_network;
 };
