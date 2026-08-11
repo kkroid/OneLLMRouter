@@ -528,7 +528,7 @@ func TestResponsesStreamRetriesCapacityFailureBeforeCommit(t *testing.T) {
 	capacityStream :=
 		"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"padding\":\"" + padding + "\"}}\n\n" +
 			"event: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"response\":{\"padding\":\"" + padding + "\"}}\n\n" +
-			"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Selected model is at capacity. Please try a different model.\"}}}\n\n"
+			"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\",\"message\":\"Our servers are currently overloaded. Please try again later.\"}}}\n\n"
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		calls++
 		if calls == 1 {
@@ -564,7 +564,7 @@ func TestResponsesStreamRetriesCapacityFailureBeforeCommit(t *testing.T) {
 	if recorder.Code != http.StatusOK || calls != 2 {
 		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, calls, recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), `"delta":"recovered"`) || strings.Contains(recorder.Body.String(), "server_is_overloaded") {
+	if !strings.Contains(recorder.Body.String(), `"delta":"recovered"`) || strings.Contains(recorder.Body.String(), "currently overloaded") {
 		t.Fatalf("unexpected streamed body: %s", recorder.Body.String())
 	}
 	if meta.UpstreamAttempts != 2 || meta.LastUpstreamStatus != http.StatusServiceUnavailable || meta.LastFailureKind != string(upstream.FailureHTTP) {

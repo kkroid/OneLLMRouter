@@ -235,7 +235,8 @@ func isResponsesCapacityError(code, message string) bool {
 		return true
 	}
 	normalized := strings.ToLower(strings.TrimSpace(message))
-	return strings.Contains(normalized, "at capacity") ||
+	return strings.Contains(normalized, "overloaded") ||
+		strings.Contains(normalized, "at capacity") ||
 		(strings.Contains(normalized, "temporarily unavailable") && strings.Contains(normalized, "model"))
 }
 
