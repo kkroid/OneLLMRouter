@@ -53,8 +53,12 @@ void RouterProcessTest::absentInstanceCannotBeControlled()
 
 static QString processFixturePath()
 {
+    QString executable = QStringLiteral("test_core_fixture");
+#ifdef Q_OS_WIN
+    executable += QStringLiteral(".exe");
+#endif
     return QDir(QCoreApplication::applicationDirPath())
-        .filePath("test_core_fixture.exe");
+        .filePath(executable);
 }
 
 void RouterProcessTest::startFailureNeverBecomesOwned()

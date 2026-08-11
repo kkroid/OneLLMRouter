@@ -108,7 +108,11 @@ void RouterDiscoveryTest::matchesHealthToSelectedConfig()
     health.configPath = "c:/TMP/router.yaml";
     health.port = 45678;
 
+#ifdef Q_OS_WIN
     QVERIFY(healthMatchesConfig(health, config));
+#else
+    QVERIFY(!healthMatchesConfig(health, config));
+#endif
     health.configPath = "C:/tmp/other.yaml";
     QVERIFY(!healthMatchesConfig(health, config));
     health.configPath = config.configPath;
@@ -145,8 +149,12 @@ void RouterDiscoveryTest::classifiesExternalConflictAndAbsent()
 
 static QString fixturePath()
 {
+    QString executable = QStringLiteral("test_core_fixture");
+#ifdef Q_OS_WIN
+    executable += QStringLiteral(".exe");
+#endif
     return QDir(QCoreApplication::applicationDirPath())
-        .filePath("test_core_fixture.exe");
+        .filePath(executable);
 }
 
 static quint16 safeDynamicPort(QTcpServer &server)
