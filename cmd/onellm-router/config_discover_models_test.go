@@ -34,7 +34,8 @@ providers:
     base_url: %s
     api_key: %s
     proxy: false
-    models: [configured-model]
+    models:
+      - {id: configured-model, endpoints: [anthropic]}
 codex:
   models: {}
 model_slots: {}

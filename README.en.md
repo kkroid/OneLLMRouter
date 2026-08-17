@@ -61,7 +61,7 @@ Set-Location OneLLMRouter
 pwsh .\build.ps1
 ```
 
-The result is `dist/onellm-router-v1.5.0.exe`.
+The result is `dist/onellm-router-v1.5.1.exe`.
 
 Building the desktop Setup package also requires Qt 6.8.3 for MSVC 2022 x64, CMake, MSVC 2022, and Inno Setup 6:
 
@@ -70,7 +70,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-The installer is written to `dist/OneLLMRouter-1.5.0-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`.
+The installer is written to `dist/OneLLMRouter-1.5.1-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`. Start it from the Start menu after a first installation; upgrades restore an already-running tray once through Windows Restart Manager.
 
 ## Configuration
 
@@ -120,14 +120,18 @@ providers:
     openai_base_url: "https://api.example.com"
     api_key: "sk-your-key"
     proxy: true
-    models: ["gpt-5.6-sol"]
+    models:
+      - id: "claude-model[1m]"
+        endpoints: [anthropic]
+      - id: "responses-model"
+        endpoints: [openai, responses]
 
 model_slots:
-  default: "example/gpt-5.6-sol"
-  opus: "example/gpt-5.6-sol"
-  sonnet: "example/gpt-5.6-sol"
-  haiku: "example/gpt-5.6-sol"
-  fable: "example/gpt-5.6-sol"
+  default: "example/claude-model[1m]"
+  opus: "example/claude-model[1m]"
+  sonnet: "example/claude-model[1m]"
+  haiku: "example/claude-model[1m]"
+  fable: "example/claude-model[1m]"
 ```
 
 Each provider can expose one or more protocol-specific base URLs:
@@ -138,12 +142,12 @@ Each provider can expose one or more protocol-specific base URLs:
 
 Set `proxy: true` or `false` on a provider to override the global SOCKS5 setting. If omitted, the provider inherits the global proxy configuration.
 
-Configured provider models take precedence over upstream discovery. When `models` is omitted, OneLLMRouter queries that provider's protocol-specific model endpoint.
+Every `models` entry must use object form and explicitly declare its `anthropic`, `openai`, or `responses` upstream routes with `endpoints`. Use `upstream_model` when the exact upstream name differs from the client-visible ID. Configured provider models take precedence over upstream discovery. When `models` is omitted, OneLLMRouter queries that provider's protocol-specific model endpoint.
 
 ## Run
 
 ```powershell
-.\dist\onellm-router-v1.5.0.exe
+.\dist\onellm-router-v1.5.1.exe
 ```
 
 The service prints the Claude Code environment block at startup. The desktop Clients page or the `client claude` commands can apply it through a controlled merge. The main CLI commands are:
@@ -158,9 +162,10 @@ onellm-router version        Print the version
 onellm-router stats day      Show UTC daily token usage
 onellm-router stats week     Show ISO-week token usage
 onellm-router stats month    Show UTC monthly token usage
+onellm-router stats range START END  Show an inclusive UTC date range
 ```
 
-The `stats` commands accept an optional period label and `--json`. Usage is grouped by provider, requested model, and upstream model, with input, output, cache-read, cache-write, and reasoning tokens kept separate. Missing upstream fields are reported as unknown rather than zero. Records use one stable request ID with a one-based upstream attempt number, including failed, exhausted, cancelled, and service-shutdown attempts.
+`stats day/week/month` accept an optional period label, while `stats range` requires inclusive `YYYY-MM-DD` start and end dates; every stats command supports `--json`. Usage is grouped by provider, requested model, and upstream model, with input, output, cache-read, cache-write, and reasoning tokens kept separate. Missing upstream fields are reported as unknown rather than zero. Records use one stable request ID with a one-based upstream attempt number, including failed, exhausted, cancelled, and service-shutdown attempts.
 
 ## Claude Code
 
@@ -216,7 +221,7 @@ onellm-router client codex preview --model example/gpt-5.6-sol --json
 onellm-router client codex catalog-apply --json
 ```
 
-v1.5.0 never writes, backs up, or restores Codex `config.toml`, and it has no raw TOML or catalog JSON editor. `catalog-apply` regenerates only the OneLLMRouter catalog and writes the legacy Codex catalog path only when `codex.overwrite_catalog: true`.
+v1.5.1 never writes, backs up, or restores Codex `config.toml`, and it has no raw TOML or catalog JSON editor. `catalog-apply` regenerates only the OneLLMRouter catalog and writes the legacy Codex catalog path only when `codex.overwrite_catalog: true`.
 
 The local provider prefix is removed before an inference request is sent upstream. For example, selecting `example/gpt-5.6-sol` sends `gpt-5.6-sol` to the provider.
 
@@ -230,7 +235,7 @@ Providers may charge for failed or ambiguous attempts. OneLLMRouter cannot guara
 
 ## Windows Desktop
 
-The Qt desktop provides Providers, Clients, and Usage pages, with model configuration and manual discovery scoped to each Provider. Provider/model edits immediately update the UI draft and use Core validation plus atomic configuration updates; existing API keys are never displayed, and a successful save gracefully restarts the Core owned by the tray. An externally managed Core remains read-only. Clients provides the controlled Claude merge/restore and read-only Codex status/preview/catalog sync described above. Usage reads the Core day/week/month statistics. v1.5.0 has no MCP/Skill/Prompt management, Auto Failover, raw client-file editor, or unrelated preference editor. The tray also displays router health, version, model count, configured port, and local SOCKS5 reachability. It chooses English or Simplified Chinese from the system locale.
+The Qt desktop provides Providers, Clients, and Usage pages, with model configuration and manual discovery scoped to each Provider. Provider/model edits immediately update the UI draft and use Core validation plus atomic configuration updates; existing API keys are never displayed, and a successful save gracefully restarts the Core owned by the tray. An externally managed Core remains read-only. Clients provides the controlled Claude merge/restore and read-only Codex status/preview/catalog sync described above. Usage automatically reads Core statistics for Today, This month, or an inclusive custom date range. v1.5.1 has no MCP/Skill/Prompt management, Auto Failover, raw client-file editor, or unrelated preference editor. The tray also displays router health, version, model count, configured port, and local SOCKS5 reachability. It chooses English or Simplified Chinese from the system locale.
 
 The tray controls only a core process that it started itself. A matching externally started router is attached read-only, while an unrelated listener is reported as a port conflict. Stop and restart are graceful; the application does not enumerate or terminate processes by image name.
 
@@ -248,7 +253,7 @@ Setup upgrades preserve configuration, API keys, logs, and generated catalogs. W
 | Portable `--daemon`, `install`, `uninstall` | Supported | Unsupported | Unsupported |
 | Desktop autostart and application restart integration | Supported | Unsupported | Unsupported |
 
-The release workflow compiles and tests Go and Qt on all three operating systems, but v1.5.0 publishes only the Windows x64 portable executable and Setup installer. Linux and macOS support is a source-build foundation, not a complete native installation or lifecycle experience.
+The release workflow compiles and tests Go and Qt on all three operating systems, but v1.5.1 publishes only the Windows x64 portable executable and Setup installer. Linux and macOS support is a source-build foundation, not a complete native installation or lifecycle experience.
 
 ## Logging
 

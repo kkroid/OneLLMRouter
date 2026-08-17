@@ -19,7 +19,10 @@ func TestBuildConfigInfoOmitsSecrets(t *testing.T) {
 		Log:    config.LogConfig{Dir: `C:\tmp\onellm-test\logs`},
 		Proxy:  config.ProxyConfig{Socks5: "127.0.0.1:1082"},
 		Providers: []config.ProviderConfig{{
-			Prefix: "test", APIKey: "must-not-appear", Models: []string{"model"},
+			Prefix: "test", APIKey: "must-not-appear",
+			ModelConfigs: []config.ProviderModelConfig{{
+				ID: "model", Endpoints: []string{"anthropic"},
+			}},
 		}},
 	}
 
@@ -92,7 +95,8 @@ providers:
   - prefix: "test"
     base_url: "https://example.invalid/anthropic"
     api_key: "fake-api-key"
-    models: ["model"]
+    models:
+      - {id: "model", endpoints: [anthropic]}
 `, logDir)
 	if err := os.WriteFile(configFile, []byte(configData), 0600); err != nil {
 		t.Fatal(err)

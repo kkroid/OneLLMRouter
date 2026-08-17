@@ -37,6 +37,27 @@ func TestListConfiguredModelsOverrideUpstream(t *testing.T) {
 	assertModelIDs(t, result.Models, "c78/gpt-5.6-sol", "c78/not-real")
 }
 
+func TestListFiltersConfiguredModelsByEndpoint(t *testing.T) {
+	service := New(nil)
+	provider := router.Provider{
+		Prefix:           "ds",
+		BaseURL:          "http://unused",
+		ResponsesBaseURL: "http://unused",
+		ModelRoutes: []router.ModelRoute{
+			{ID: "claude-model", Endpoints: []router.EndpointType{router.EndpointAnthropic}},
+			{ID: "responses-model", Endpoints: []router.EndpointType{router.EndpointResponses}, UpstreamModel: "upstream-model"},
+		},
+	}
+
+	responses := service.List(context.Background(), []router.Provider{provider}, router.EndpointResponses)
+	assertModelIDs(t, responses.Models, "ds/responses-model")
+	if len(responses.Errors) != 0 {
+		t.Fatalf("responses errors: %+v", responses.Errors)
+	}
+	anthropic := service.List(context.Background(), []router.Provider{provider}, router.EndpointAnthropic)
+	assertModelIDs(t, anthropic.Models, "ds/claude-model")
+}
+
 func TestListUsesRequestedProtocolURL(t *testing.T) {
 	type source struct {
 		endpoint router.EndpointType

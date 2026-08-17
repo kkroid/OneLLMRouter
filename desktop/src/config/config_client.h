@@ -3,6 +3,7 @@
 #include "../clients/clients_model.h"
 
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QList>
 #include <QMap>
 #include <QObject>
@@ -16,6 +17,7 @@ struct ProviderConfigSnapshot {
     QString responsesBaseUrl;
     bool apiKeySet = false;
     QStringList models;
+    QJsonArray modelDefinitions;
     enum class ProxyPolicy { Inherit, UseProxy, Direct } proxy = ProxyPolicy::Inherit;
 };
 

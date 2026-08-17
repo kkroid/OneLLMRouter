@@ -20,7 +20,12 @@ providers:
   - prefix: alpha
     base_url: https://example.invalid/anthropic
     api_key: %s
-    models: [default, opus, sonnet, haiku, fable]
+    models:
+      - {id: default, endpoints: [anthropic]}
+      - {id: opus, endpoints: [anthropic]}
+      - {id: sonnet, endpoints: [anthropic]}
+      - {id: haiku, endpoints: [anthropic]}
+      - {id: fable, endpoints: [anthropic]}
 model_slots:
   default: alpha/default
   opus: alpha/opus

@@ -13,6 +13,10 @@ if ($installer -notmatch '(?m)^CloseApplicationsFilter=\{#AppExeName\}\s*$') {
 if ($installer -notmatch '(?m)^RestartApplications=yes\s*$') {
     throw "Installer does not restart applications after upgrade"
 }
+if ($installer -match '(?m)^\[Run\]\s*$' -or
+    $installer -match '(?i)\bpostinstall\b') {
+    throw "Installer must not add a second Finish-page launch path"
+}
 if ($workflow -notmatch 'tools[\\/]installer-running-upgrade-test\.ps1') {
     throw "Release workflow does not run the live installer upgrade test"
 }
@@ -49,6 +53,9 @@ if ($integration -notmatch '\$beforeCorePID' -or
 if ($integration -notmatch 'running upgrade marker' -or
     $integration -notmatch 'Wait-DynamicPortClosed') {
     throw "Live installer upgrade test does not verify configuration preservation and shutdown"
+}
+if ($integration -match 'models:\s*\[\s*"gpt-5\.6-sol"\s*\]') {
+    throw "Live installer upgrade fixture still uses legacy string model configuration"
 }
 if ($integration -notmatch 'Get-FileHash' -or
     ([regex]::Matches($integration, 'Assert-ConfigUnchanged').Count -lt 3)) {

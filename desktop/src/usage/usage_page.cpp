@@ -1,25 +1,31 @@
 #include "usage_page.h"
 
+#include <QCalendarWidget>
 #include <QComboBox>
+#include <QDateTime>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
+#include <QMenu>
 #include <QProcess>
 #include <QPushButton>
+#include <QSizePolicy>
 #include <QTableView>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 
 UsageClient::UsageClient(QString executable, QObject *parent)
     : QObject(parent), m_executable(std::move(executable))
 {
 }
 
-UsageResult UsageClient::load(const QString &period, const QString &label) const
+UsageResult UsageClient::load(const QString &period, const QString &start,
+                              const QString &end) const
 {
     QProcess process;
     QStringList arguments{"stats", period};
-    if (!label.trimmed().isEmpty()) arguments.append(label.trimmed());
+    if (!start.isEmpty()) arguments.append(start);
+    if (!end.isEmpty()) arguments.append(end);
     arguments.append("--json");
     process.start(m_executable, arguments);
     if (!process.waitForStarted(5000)) return {false, "Core stats command could not start"};
@@ -39,19 +45,50 @@ UsagePage::UsagePage(UsageClient *client, QWidget *parent)
     auto *layout = new QVBoxLayout(this);
     auto *controls = new QHBoxLayout;
     m_period = new QComboBox(this); m_period->setObjectName("usagePeriod");
-    m_period->addItem("Day", "day");
-    m_period->addItem("Week", "week");
-    m_period->addItem("Month", "month");
-    m_range = new QLineEdit(this); m_range->setObjectName("usageRange");
-    auto *refreshButton = new QPushButton("Refresh", this);
-    refreshButton->setObjectName("refreshUsage");
+    m_period->addItem("Today", "today");
+    m_period->addItem("This month", "month");
+    m_period->addItem("Custom range", "custom");
+    m_customRange = new QWidget(this); m_customRange->setObjectName("usageCustomRange");
+    m_customRange->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    auto *rangeLayout = new QHBoxLayout(m_customRange);
+    rangeLayout->setContentsMargins(0, 0, 0, 0);
+    const QDate today = QDateTime::currentDateTimeUtc().date();
+    const QDate monthStart(today.year(), today.month(), 1);
+    m_startDate = new QPushButton(monthStart.toString("yyyy-MM-dd"), m_customRange);
+    m_startDate->setObjectName("usageStartDate");
+    m_endDate = new QPushButton(today.toString("yyyy-MM-dd"), m_customRange);
+    m_endDate->setObjectName("usageEndDate");
+    m_startCalendar = new QCalendarWidget(m_startDate);
+    m_startCalendar->setObjectName("usageStartCalendar");
+    m_startCalendar->setMaximumDate(today);
+    m_startCalendar->setSelectedDate(monthStart);
+    m_endCalendar = new QCalendarWidget(m_endDate);
+    m_endCalendar->setObjectName("usageEndCalendar");
+    m_endCalendar->setDateRange(monthStart, today);
+    m_endCalendar->setSelectedDate(today);
+    const auto attachCalendar = [](QPushButton *button, QCalendarWidget *calendar) {
+        auto *menu = new QMenu(button);
+        auto *action = new QWidgetAction(menu);
+        action->setDefaultWidget(calendar);
+        menu->addAction(action);
+        button->setMenu(menu);
+        button->setMinimumWidth(105);
+    };
+    attachCalendar(m_startDate, m_startCalendar);
+    attachCalendar(m_endDate, m_endCalendar);
+    rangeLayout->addWidget(new QLabel("From", m_customRange));
+    rangeLayout->addWidget(m_startDate);
+    rangeLayout->addWidget(new QLabel("To", m_customRange));
+    rangeLayout->addWidget(m_endDate);
+    m_customRange->setVisible(false);
     m_provider = new QComboBox(this); m_provider->setObjectName("usageProvider");
     m_requestedModel = new QComboBox(this); m_requestedModel->setObjectName("usageModel");
     controls->addWidget(new QLabel("Period", this)); controls->addWidget(m_period);
-    controls->addWidget(m_range); controls->addWidget(refreshButton);
+    controls->addWidget(m_customRange);
     controls->addSpacing(12);
     controls->addWidget(new QLabel("Provider", this)); controls->addWidget(m_provider);
     controls->addWidget(new QLabel("Model", this)); controls->addWidget(m_requestedModel);
+    controls->addStretch();
     layout->addLayout(controls);
 
     m_status = new QLabel(this); m_status->setObjectName("usageStatus");
@@ -64,13 +101,33 @@ UsagePage::UsagePage(UsageClient *client, QWidget *parent)
     layout->addWidget(m_table);
 
     connect(m_period, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            [this] { updateRangePlaceholder(); });
-    connect(refreshButton, &QPushButton::clicked, this, &UsagePage::refresh);
+            [this] {
+                updateDateControl();
+                if (m_period->currentData().toString() != "custom") refresh();
+            });
+    connect(m_startCalendar, &QCalendarWidget::clicked, this,
+            [this](const QDate &date) {
+                m_startCalendar->setSelectedDate(date);
+                m_startDate->setText(date.toString("yyyy-MM-dd"));
+                m_startDate->menu()->hide();
+                m_endCalendar->setMinimumDate(date);
+                if (m_endCalendar->selectedDate() < date) {
+                    m_endCalendar->setSelectedDate(date);
+                    m_endDate->setText(date.toString("yyyy-MM-dd"));
+                }
+            });
+    connect(m_endCalendar, &QCalendarWidget::clicked, this,
+            [this](const QDate &date) {
+                m_endCalendar->setSelectedDate(date);
+                m_endDate->setText(date.toString("yyyy-MM-dd"));
+                m_endDate->menu()->hide();
+                if (m_period->currentData().toString() == "custom") refresh();
+            });
     connect(m_provider, qOverload<int>(&QComboBox::currentIndexChanged), this,
             [this] { updateFilters(); applyFilters(); });
     connect(m_requestedModel, qOverload<int>(&QComboBox::currentIndexChanged),
             this, &UsagePage::applyFilters);
-    updateRangePlaceholder();
+    updateDateControl();
     refresh();
 }
 
@@ -78,8 +135,14 @@ UsageModel *UsagePage::model() const { return m_model; }
 
 void UsagePage::refresh()
 {
-    const UsageResult result = m_client->load(
-        m_period->currentData().toString(), m_range->text());
+    const QString mode = m_period->currentData().toString();
+    const QString period = mode == "month" ? "month"
+        : mode == "custom" ? "range" : "day";
+    const QString start = mode == "custom"
+        ? m_startCalendar->selectedDate().toString("yyyy-MM-dd") : QString();
+    const QString end = mode == "custom"
+        ? m_endCalendar->selectedDate().toString("yyyy-MM-dd") : QString();
+    const UsageResult result = m_client->load(period, start, end);
     if (!result.succeeded) {
         m_model->setResult({});
         m_status->setText(result.error);
@@ -104,12 +167,9 @@ void UsagePage::refresh()
         m_status->setText(QString("Showing %1 %2 (UTC)").arg(result.period, result.label));
 }
 
-void UsagePage::updateRangePlaceholder()
+void UsagePage::updateDateControl()
 {
-    const QString period = m_period->currentData().toString();
-    m_range->setPlaceholderText(period == "day" ? "YYYY-MM-DD (current UTC day)"
-        : period == "week" ? "YYYY-Www (current ISO week)"
-                           : "YYYY-MM (current UTC month)");
+    m_customRange->setVisible(m_period->currentData().toString() == "custom");
 }
 
 void UsagePage::updateFilters()

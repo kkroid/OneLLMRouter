@@ -2,6 +2,23 @@
 
 All notable user-facing changes to OneLLMRouter are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Added endpoint-scoped Provider model declarations with required endpoint assignments and optional upstream model names.
+- Added the running Core version to the healthy system-tray tooltip.
+- Added inclusive `stats range START END` reporting and automatic Today, This month, and Custom range filters to the Usage page.
+
+### Changed
+
+- Usage token totals now use compact K/M/B formatting with exact values in tooltips; unavailable token fields no longer add table noise.
+
+### Fixed
+
+- Removed the Finish-page launch action so a running tray is restored only once by Windows Restart Manager during upgrades.
+- Preserved monthly and custom-range results when historical Usage records do not contain a requested model.
+
 ## [1.5.0] - 2026-08-11
 
 ### Added

@@ -31,6 +31,9 @@ QString legacyAutoStartValueName();
 void configureAutoStart(QSettings &settings, bool enabled,
                         const QString &command);
 bool migrateLegacyAutoStart(QSettings &settings, const QString &command);
+QString trayToolTipText(RouterState state, const QString &stateText,
+                        const QString &coreVersion,
+                        const QString &fallbackVersion);
 
 class NotificationLimiter {
 public:
@@ -58,6 +61,7 @@ private:
     void discover();
     void startOwned();
     void setState(RouterState state, const QString &detail = {});
+    void updateTrayPresentation();
     QString stateText() const;
     void setAutoStartEnabled(bool enabled);
     bool autoStartEnabled() const;

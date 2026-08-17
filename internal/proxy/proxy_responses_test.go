@@ -101,6 +101,39 @@ func TestResponses_DirectNonStream(t *testing.T) {
 	}
 }
 
+func TestResponsesUsesEndpointUpstreamModel(t *testing.T) {
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Model != "deepseek-v4-pro" {
+			t.Fatalf("upstream model = %q", body.Model)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"response","object":"response","output":[]}`)
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "ds", ResponsesBaseURL: mockAPI.URL,
+		ModelRoutes: []router.ModelRoute{{
+			ID: "deepseek-v4-pro[1m]", Endpoints: []router.EndpointType{router.EndpointResponses},
+			UpstreamModel: "deepseek-v4-pro",
+		}},
+	}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"ds/deepseek-v4-pro[1m]","input":"hi"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeResponses(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestResponsesStreamUsageCollectionPreservesBytes(t *testing.T) {
 	stream := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":8,\"input_tokens_details\":{\"cached_tokens\":2},\"output_tokens_details\":{\"reasoning_tokens\":3}}}}\n\n"

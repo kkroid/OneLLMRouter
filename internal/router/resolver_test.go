@@ -130,34 +130,81 @@ func TestProviderRequiresConfiguredEndpointRegardlessOfPrefix(t *testing.T) {
 	}
 }
 
-func TestResolverOneMAlias(t *testing.T) {
+func TestResolverPreservesOneMModelName(t *testing.T) {
 	r := NewResolver([]Provider{
 		{Prefix: "ds", Name: "DeepSeek", Models: []string{"deepseek-v4-pro[1m]", "deepseek-v4-flash[1m]"}},
 	})
 
-	// Without [1m] (Claude Code strips it) → passthrough
-	result := r.Resolve("ds/deepseek-v4-pro")
+	if result := r.Resolve("ds/deepseek-v4-pro"); result != nil {
+		t.Fatalf("unexpected alias match: %+v", result)
+	}
+	result := r.Resolve("ds/deepseek-v4-pro[1m]")
 	if result == nil {
-		t.Fatal("expected match for ds/deepseek-v4-pro (alias)")
-	}
-	if result.Model != "deepseek-v4-pro" {
-		t.Errorf("model should be deepseek-v4-pro (passthrough), got %s", result.Model)
-	}
-
-	// With [1m] → passthrough
-	result2 := r.Resolve("ds/deepseek-v4-pro[1m]")
-	if result2 == nil {
 		t.Fatal("expected match for ds/deepseek-v4-pro[1m]")
 	}
-	if result2.Model != "deepseek-v4-pro[1m]" {
-		t.Errorf("model should be deepseek-v4-pro[1m] (passthrough), got %s", result2.Model)
+	if result.Model != "deepseek-v4-pro[1m]" {
+		t.Errorf("model should be preserved, got %s", result.Model)
+	}
+}
+
+func TestResolverUsesEndpointSpecificModelRoute(t *testing.T) {
+	r := NewResolver([]Provider{{
+		Prefix: "ds", BaseURL: "http://unused", ResponsesBaseURL: "http://unused",
+		ModelRoutes: []ModelRoute{
+			{ID: "deepseek-v4-pro[1m]", Endpoints: []EndpointType{EndpointAnthropic}, UpstreamModel: "deepseek-v4-pro[1m]"},
+			{ID: "deepseek-v4-pro", Endpoints: []EndpointType{EndpointResponses}, UpstreamModel: "deepseek-v4-pro"},
+		},
+	}})
+
+	if result := r.ResolveForEndpoint("ds/deepseek-v4-pro[1m]", EndpointAnthropic); result == nil || result.Model != "deepseek-v4-pro[1m]" {
+		t.Fatalf("anthropic route = %+v", result)
+	}
+	if result := r.ResolveForEndpoint("ds/deepseek-v4-pro", EndpointResponses); result == nil || result.Model != "deepseek-v4-pro" {
+		t.Fatalf("responses route = %+v", result)
+	}
+	if result := r.ResolveForEndpoint("ds/deepseek-v4-pro[1m]", EndpointResponses); result != nil {
+		t.Fatalf("anthropic-only model resolved for responses: %+v", result)
+	}
+}
+
+func TestResolverMapsClientModelToEndpointUpstreamModel(t *testing.T) {
+	r := NewResolver([]Provider{{
+		Prefix: "ds", ResponsesBaseURL: "http://unused",
+		ModelRoutes: []ModelRoute{{
+			ID: "deepseek-v4-pro[1m]", Endpoints: []EndpointType{EndpointResponses}, UpstreamModel: "deepseek-v4-pro",
+		}},
+	}})
+
+	result := r.ResolveForEndpoint("ds/deepseek-v4-pro[1m]", EndpointResponses)
+	if result == nil || result.Model != "deepseek-v4-pro" {
+		t.Fatalf("responses route = %+v", result)
+	}
+}
+
+func TestResolverPrefersExactModelOverOneMAlias(t *testing.T) {
+	r := NewResolver([]Provider{{
+		Prefix: "ds", ResponsesBaseURL: "http://unused",
+		ModelRoutes: []ModelRoute{
+			{ID: "model[1m]", Endpoints: []EndpointType{EndpointResponses}, UpstreamModel: "alias-upstream"},
+			{ID: "model", Endpoints: []EndpointType{EndpointResponses}, UpstreamModel: "exact-upstream"},
+		},
+	}})
+
+	result := r.ResolveForEndpoint("ds/model", EndpointResponses)
+	if result == nil || result.Model != "exact-upstream" {
+		t.Fatalf("responses route = %+v", result)
 	}
 }
 
 func TestFromConfig(t *testing.T) {
 	providers := FromConfig([]config.ProviderConfig{
-		{Name: "DeepSeek", Prefix: "ds", BaseURL: "https://api.deepseek.com/anthropic", APIKey: "sk-test", Models: []string{"deepseek-v4-pro", "deepseek-v4-flash"}},
-		{Name: "Provider CP", Prefix: "cp", BaseURL: "https://example.invalid/anthropic", APIKey: "sk-test", Models: []string{"claude-opus-4.8"}},
+		{Name: "DeepSeek", Prefix: "ds", BaseURL: "https://api.deepseek.com/anthropic", APIKey: "sk-test", ModelConfigs: []config.ProviderModelConfig{
+			{ID: "deepseek-v4-pro", Endpoints: []string{"anthropic"}},
+			{ID: "deepseek-v4-flash", Endpoints: []string{"anthropic"}},
+		}},
+		{Name: "Provider CP", Prefix: "cp", BaseURL: "https://example.invalid/anthropic", APIKey: "sk-test", ModelConfigs: []config.ProviderModelConfig{
+			{ID: "claude-opus-4.8", Endpoints: []string{"anthropic"}},
+		}},
 	})
 
 	if len(providers) != 2 {
@@ -171,7 +218,7 @@ func TestFromConfig(t *testing.T) {
 			break
 		}
 	}
-	if ds == nil || ds.Name != "DeepSeek" || ds.BaseURL != "https://api.deepseek.com/anthropic" || ds.APIKey != "sk-test" || len(ds.Models) != 2 {
+	if ds == nil || ds.Name != "DeepSeek" || ds.BaseURL != "https://api.deepseek.com/anthropic" || ds.APIKey != "sk-test" || len(ds.ModelRoutes) != 2 {
 		t.Errorf("wrong ds provider: %+v", ds)
 	}
 
@@ -182,7 +229,7 @@ func TestFromConfig(t *testing.T) {
 			break
 		}
 	}
-	if cp == nil || cp.Name != "Provider CP" || len(cp.Models) != 1 {
+	if cp == nil || cp.Name != "Provider CP" || len(cp.ModelRoutes) != 1 {
 		t.Errorf("wrong cp provider: %+v", cp)
 	}
 }

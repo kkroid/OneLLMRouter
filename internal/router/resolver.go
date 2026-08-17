@@ -9,7 +9,6 @@ import (
 type Resolver struct {
 	mu        sync.RWMutex
 	providers []Provider
-	modelMap  map[string]*Provider // "prefix/model" → Provider
 }
 
 // NewResolver creates a Resolver from a provider list.
@@ -25,20 +24,6 @@ func (r *Resolver) Reload(providers []Provider) {
 	defer r.mu.Unlock()
 
 	r.providers = providers
-	r.modelMap = make(map[string]*Provider, len(providers)*4)
-
-	for i := range r.providers {
-		p := &r.providers[i]
-		for _, m := range p.Models {
-			r.modelMap[p.Prefix+"/"+m] = p
-			// Also register alias without [1m] suffix (Claude Code strips it)
-			if strings.HasSuffix(m, "[1m]") {
-				alias := strings.TrimSuffix(m, "[1m]")
-				r.modelMap[p.Prefix+"/"+alias] = p
-				r.modelMap[p.Prefix+"/"+m] = p // keep original as canonical
-			}
-		}
-	}
 }
 
 // ResolveResult holds the resolved provider and stripped model name.
@@ -50,33 +35,39 @@ type ResolveResult struct {
 // Resolve finds the provider for a given full model identifier.
 // Supports:
 //   - "provider/model" — exact match
-//   - "provider/model[1m]" — exact match (canonical)
+//   - "provider/model[1m]" — exact match
 //   - "provider" — prefix-only match, first model
-//   - Auto-maps [1m]-less names to canonical [1m] names
 //
 // Returns nil if no provider matches.
 func (r *Resolver) Resolve(fullName string) *ResolveResult {
+	return r.ResolveForEndpoint(fullName, "")
+}
+
+// ResolveForEndpoint resolves a client-visible model for one upstream protocol.
+func (r *Resolver) ResolveForEndpoint(fullName string, endpoint EndpointType) *ResolveResult {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Exact match
-	if p, ok := r.modelMap[fullName]; ok {
-		model := canonicalModelName(p, fullName)
-		return &ResolveResult{Provider: p, Model: model}
-	}
-
-	// Prefix-only match uses the provider's first configured model.
 	for i := range r.providers {
-		if fullName == r.providers[i].Prefix && len(r.providers[i].Models) > 0 {
-			return &ResolveResult{
-				Provider: &r.providers[i],
-				Model:    r.providers[i].Models[0],
+		provider := &r.providers[i]
+		if endpoint != "" && !provider.SupportsEndpoint(endpoint) {
+			continue
+		}
+		if fullName == provider.Prefix {
+			for _, route := range provider.ConfiguredModelRoutes() {
+				if route.SupportsEndpoint(endpoint) {
+					return resolvedRoute(provider, route, route.ID)
+				}
 			}
+			return nil
 		}
 	}
 
 	for i := range r.providers {
 		provider := &r.providers[i]
+		if endpoint != "" && !provider.SupportsEndpoint(endpoint) {
+			continue
+		}
 		for _, separator := range []string{"/", "-"} {
 			prefix := provider.Prefix + separator
 			if !strings.HasPrefix(fullName, prefix) {
@@ -86,8 +77,12 @@ func (r *Resolver) Resolve(fullName string) *ResolveResult {
 			if model == "" {
 				return nil
 			}
-			if len(provider.Models) == 0 || configuredModel(provider.Models, model) {
+			routes := provider.ConfiguredModelRoutes()
+			if len(routes) == 0 {
 				return &ResolveResult{Provider: provider, Model: model}
+			}
+			if route, ok := findModelRoute(routes, endpoint, model); ok {
+				return resolvedRoute(provider, route, model)
 			}
 			return nil
 		}
@@ -95,36 +90,33 @@ func (r *Resolver) Resolve(fullName string) *ResolveResult {
 
 	// Bare model name: search configured model lists only.
 	for i := range r.providers {
-		for _, m := range r.providers[i].Models {
-			if m == fullName || strings.TrimSuffix(m, "[1m]") == fullName {
-				return &ResolveResult{
-					Provider: &r.providers[i],
-					Model:    fullName,
-				}
-			}
+		provider := &r.providers[i]
+		if endpoint != "" && !provider.SupportsEndpoint(endpoint) {
+			continue
+		}
+		if route, ok := findModelRoute(provider.ConfiguredModelRoutes(), endpoint, fullName); ok {
+			return resolvedRoute(provider, route, fullName)
 		}
 	}
 
 	return nil
 }
 
-func configuredModel(models []string, requested string) bool {
-	for _, model := range models {
-		if model == requested || strings.TrimSuffix(model, "[1m]") == requested {
-			return true
+func findModelRoute(routes []ModelRoute, endpoint EndpointType, requested string) (ModelRoute, bool) {
+	for _, route := range routes {
+		if route.SupportsEndpoint(endpoint) && route.ID == requested {
+			return route, true
 		}
 	}
-	return false
+	return ModelRoute{}, false
 }
 
-// canonicalModelName returns the model name to use for the API call.
-// Passes through the requested name as-is (transparent proxy).
-func canonicalModelName(p *Provider, fullName string) string {
-	parts := strings.SplitN(fullName, "/", 2)
-	if len(parts) == 2 {
-		return parts[1]
+func resolvedRoute(provider *Provider, route ModelRoute, requested string) *ResolveResult {
+	upstreamModel := route.UpstreamModel
+	if upstreamModel == "" {
+		upstreamModel = requested
 	}
-	return fullName
+	return &ResolveResult{Provider: provider, Model: upstreamModel}
 }
 
 // AllModelIDs returns canonical model IDs (no aliases).
@@ -134,9 +126,10 @@ func (r *Resolver) AllModelIDs() []string {
 
 	seen := make(map[string]bool)
 	var ids []string
-	for _, p := range r.providers {
-		for _, m := range p.Models {
-			id := p.Prefix + "/" + m
+	for index := range r.providers {
+		provider := &r.providers[index]
+		for _, route := range provider.ConfiguredModelRoutes() {
+			id := provider.Prefix + "/" + route.ID
 			if !seen[id] {
 				seen[id] = true
 				ids = append(ids, id)

@@ -1,6 +1,5 @@
 #include "usage_model.h"
 
-#include <QBrush>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -45,6 +44,34 @@ const UsageTokenValue *tokenAt(const UsageRow &row, int column)
     }
 }
 
+QString compactToken(qint64 value)
+{
+    const double numeric = double(value);
+    double scaled = numeric;
+    QString suffix;
+    int decimals = 0;
+    if (value >= 1000000000) {
+        scaled = numeric / 1000000000.0;
+        suffix = "B";
+        decimals = 2;
+    } else if (value >= 1000000) {
+        scaled = numeric / 1000000.0;
+        suffix = "M";
+        decimals = 2;
+    } else if (value >= 1000) {
+        scaled = numeric / 1000.0;
+        suffix = "K";
+        decimals = 1;
+    } else {
+        return QString::number(value);
+    }
+
+    QString result = QString::number(scaled, 'f', decimals);
+    while (result.endsWith('0')) result.chop(1);
+    if (result.endsWith('.')) result.chop(1);
+    return result + suffix;
+}
+
 } // namespace
 
 UsageModel::UsageModel(QObject *parent) : QAbstractTableModel(parent) {}
@@ -70,15 +97,10 @@ QVariant UsageModel::data(const QModelIndex &index, int role) const
         if (const UsageTokenValue *value = tokenAt(usage, index.column()))
             return displayToken(*value);
     }
-    if (role == Qt::ForegroundRole) {
-        const UsageTokenValue *value = tokenAt(usage, index.column());
-        if (value && value->unknown > 0) return QBrush(Qt::darkYellow);
-    }
     if (role == Qt::ToolTipRole) {
         const UsageTokenValue *value = tokenAt(usage, index.column());
-        if (value && value->unknown > 0)
-            return QString("%1 record(s) did not report this token value")
-                .arg(value->unknown);
+        if (value)
+            return QString("Tokens: %1").arg(QString::number(value->total));
     }
     return {};
 }
@@ -170,14 +192,14 @@ UsageResult UsageModel::parse(const QByteArray &json)
         row.provider = group.value("provider").toString();
         row.requestedModel = group.value("requested_model").toString();
         row.upstreamModel = group.value("upstream_model").toString();
-        if (row.provider.isEmpty() || row.requestedModel.isEmpty() ||
-            row.upstreamModel.isEmpty() ||
+        if (row.provider.isEmpty() || row.upstreamModel.isEmpty() ||
             !tokenValue(tokens, unknown, "input_tokens", &row.input) ||
             !tokenValue(tokens, unknown, "output_tokens", &row.output) ||
             !tokenValue(tokens, unknown, "cache_read_tokens", &row.cacheRead) ||
             !tokenValue(tokens, unknown, "cache_write_tokens", &row.cacheWrite) ||
             !tokenValue(tokens, unknown, "reasoning_tokens", &row.reasoning))
             return {false, "Core returned malformed stats groups"};
+        if (row.requestedModel.isEmpty()) row.requestedModel = "(not recorded)";
         result.rows.append(row);
     }
     result.succeeded = true;
@@ -186,9 +208,7 @@ UsageResult UsageModel::parse(const QByteArray &json)
 
 QString UsageModel::displayToken(const UsageTokenValue &value)
 {
-    if (value.unknown == 0) return QString::number(value.total);
-    if (value.total == 0) return QString("Unknown (%1)").arg(value.unknown);
-    return QString("%1 + unknown (%2)").arg(value.total).arg(value.unknown);
+    return compactToken(value.total);
 }
 
 void UsageModel::refreshVisibleRows()

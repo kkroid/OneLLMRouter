@@ -55,6 +55,23 @@ func TestParseRangeValidatesISOWeekYear(t *testing.T) {
 	}
 }
 
+func TestParseDateRangeIncludesBothSelectedDates(t *testing.T) {
+	selected, err := ParseDateRange("2026-08-01", "2026-08-09")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Period != PeriodRange || selected.Label != "2026-08-01 to 2026-08-09" ||
+		!selected.Start.Equal(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)) ||
+		!selected.End.Equal(time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("range = %+v", selected)
+	}
+	for _, values := range [][2]string{{"bad", "2026-08-09"}, {"2026-08-01", "bad"}, {"2026-08-09", "2026-08-01"}} {
+		if _, err := ParseDateRange(values[0], values[1]); err == nil {
+			t.Fatalf("ParseDateRange(%q, %q) error = nil", values[0], values[1])
+		}
+	}
+}
+
 func TestAggregateDirGroupsTokenUsageAndDeduplicatesAttempts(t *testing.T) {
 	dir := t.TempDir()
 	selected, err := ParseRange(PeriodDay, "2026-08-09", time.Time{})

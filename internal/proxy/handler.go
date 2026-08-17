@@ -91,7 +91,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve model → provider
-	resolved := h.Resolver.Resolve(fullModel)
+	resolved := h.Resolver.ResolveForEndpoint(fullModel, router.EndpointAnthropic)
 	if resolved == nil {
 		models := h.Resolver.AllModelIDs()
 		h.writeError(w, http.StatusBadRequest,
@@ -301,7 +301,11 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolved := h.Resolver.Resolve(fullModel)
+	resolved := h.Resolver.ResolveForEndpoint(fullModel, router.EndpointOpenAI)
+	useOpenAIDirect := resolved != nil
+	if resolved == nil {
+		resolved = h.Resolver.ResolveForEndpoint(fullModel, router.EndpointAnthropic)
+	}
 	if resolved == nil {
 		models := h.Resolver.AllModelIDs()
 		h.writeError(w, http.StatusBadRequest,
@@ -323,7 +327,7 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 	meta.MaxTokens = envelope.MaxTokens
 	w = &ttfbWriter{ResponseWriter: w, meta: meta}
 
-	if resolved.Provider.OpenAIBaseURL != "" {
+	if useOpenAIDirect {
 		h.openaiDirectHandler(w, r, rawBody, envelope.Stream, resolved)
 	} else {
 		h.openaiTranslateHandler(w, r, &translatedBody, resolved)
@@ -333,10 +337,7 @@ func (h *Handler) ServeOpenAI(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, rawBody []byte, stream bool, resolved *router.ResolveResult) {
 	url := strings.TrimRight(resolved.Provider.OpenAIBaseURL, "/") + "/v1/chat/completions"
 	client := h.clientFor(resolved.Provider)
-	// OpenAI API doesn't support anthropic [1m] suffix — strip from model name
-	model := strings.TrimSuffix(resolved.Model, "[1m]")
-
-	reqBody, err := rewriteOpenAIModel(rawBody, model)
+	reqBody, err := rewriteOpenAIModel(rawBody, resolved.Model)
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
@@ -352,7 +353,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, ra
 		upstream.Metadata{
 			RequestID: onellmLog.RequestIDFromContext(r.Context()),
 			Provider:  resolved.Provider.Prefix,
-			Model:     model,
+			Model:     resolved.Model,
 			Endpoint:  string(router.EndpointOpenAI),
 		},
 		upstream.Options{
@@ -360,7 +361,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, ra
 			PerAttemptTimeout: openAIRequestTimeout(),
 			SuccessBodyLimit:  0,
 			Sanitizer:         sanitizer,
-			AttemptObserver:   h.usageAttemptObserver(r, resolved, requestModel(r), model, usage.ProtocolOpenAIChat, usage.SourceResponse),
+			AttemptObserver:   h.usageAttemptObserver(r, resolved, requestModel(r), resolved.Model, usage.ProtocolOpenAIChat, usage.SourceResponse),
 		},
 		func(ctx context.Context) (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
@@ -400,7 +401,7 @@ func (h *Handler) openaiDirectHandler(w http.ResponseWriter, r *http.Request, ra
 	// Streaming: byte-for-byte SSE passthrough
 	resp := result.Response
 	defer resp.Body.Close()
-	streamUsage := h.usageStream(r, resolved, requestModel(r), model, usage.ProtocolOpenAIChat, result.Attempts)
+	streamUsage := h.usageStream(r, resolved, requestModel(r), resolved.Model, usage.ProtocolOpenAIChat, result.Attempts)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -561,16 +562,22 @@ func (h *Handler) ServeResponses(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "no model specified")
 		return
 	}
-	resolved := h.Resolver.Resolve(fullModel)
-	if resolved == nil {
+	configured := h.Resolver.Resolve(fullModel)
+	if configured == nil {
 		models := h.Resolver.AllModelIDs()
 		h.writeError(w, http.StatusBadRequest,
 			fmt.Sprintf("unknown model: %s. Available: %s", fullModel, strings.Join(models, ",")))
 		return
 	}
-	if resolved.Provider.ResponsesBaseURL == "" {
+	if configured.Provider.ResponsesBaseURL == "" {
 		h.writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("provider %q does not support the Responses API", resolved.Provider.Prefix))
+			fmt.Sprintf("provider %q does not support the Responses API", configured.Provider.Prefix))
+		return
+	}
+	resolved := h.Resolver.ResolveForEndpoint(fullModel, router.EndpointResponses)
+	if resolved == nil {
+		h.writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("model %q is not configured for the Responses API", fullModel))
 		return
 	}
 	var bodyMap map[string]interface{}

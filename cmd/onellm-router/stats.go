@@ -23,6 +23,32 @@ func newStatsCmd(baseDir string, now func() time.Time) *cobra.Command {
 	cmd.AddCommand(statsPeriodCmd(usage.PeriodDay, "[YYYY-MM-DD]", baseDir, now))
 	cmd.AddCommand(statsPeriodCmd(usage.PeriodWeek, "[YYYY-Www]", baseDir, now))
 	cmd.AddCommand(statsPeriodCmd(usage.PeriodMonth, "[YYYY-MM]", baseDir, now))
+	cmd.AddCommand(statsRangeCmd(baseDir))
+	return cmd
+}
+
+func statsRangeCmd(baseDir string) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "range START END",
+		Short: "Show usage for an inclusive UTC date range",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			selected, err := usage.ParseDateRange(args[0], args[1])
+			if err != nil {
+				return err
+			}
+			result, err := usage.AggregateDir(baseDir, selected)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+			}
+			return writeStatsTable(cmd.OutOrStdout(), result)
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
 	return cmd
 }
 

@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "1.4.2"
+  #define AppVersion "1.5.1"
 #endif
 #ifndef StageDir
   #define StageDir "..\desktop\stage"
@@ -45,6 +45,3 @@ Name: "{group}\Uninstall OneLLMRouter"; Filename: "{uninstallexe}"
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "OneLLMRouter"; Flags: deletevalue
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OneLLMRouter Desktop"; ValueData: """{app}\{#AppExeName}"" --config ""{%USERPROFILE}\.onellm\onellm-router.yaml"""; Tasks: autostart; Flags: uninsdeletevalue
-
-[Run]
-Filename: "{app}\{#AppExeName}"; Parameters: "--config ""{%USERPROFILE}\.onellm\onellm-router.yaml"""; Description: "Launch OneLLMRouter"; Flags: nowait postinstall skipifsilent

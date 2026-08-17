@@ -81,16 +81,75 @@ type CodexModelConfig struct {
 	SupportedReasoningLevels []string `yaml:"supported_reasoning_levels" json:"supported_reasoning_levels"`
 }
 
+// ProviderModelConfig describes one client-visible model and its upstream routing scope.
+type ProviderModelConfig struct {
+	ID            string   `yaml:"id" json:"id"`
+	Endpoints     []string `yaml:"endpoints,omitempty" json:"endpoints,omitempty"`
+	UpstreamModel string   `yaml:"upstream_model,omitempty" json:"upstream_model,omitempty"`
+}
+
+func (m *ProviderModelConfig) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("model must be an object with id and endpoints")
+	}
+	type plain ProviderModelConfig
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*m = ProviderModelConfig(decoded)
+	return nil
+}
+
+func (m ProviderModelConfig) MarshalYAML() (interface{}, error) {
+	type plain ProviderModelConfig
+	return plain(m), nil
+}
+
+func (m *ProviderModelConfig) UnmarshalJSON(data []byte) error {
+	type plain ProviderModelConfig
+	var decoded plain
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*m = ProviderModelConfig(decoded)
+	return nil
+}
+
+func (m ProviderModelConfig) MarshalJSON() ([]byte, error) {
+	type plain ProviderModelConfig
+	return json.Marshal(plain(m))
+}
+
 // ProviderConfig represents a single model provider.
 type ProviderConfig struct {
-	Name             string   `yaml:"name"`
-	Prefix           string   `yaml:"prefix"`
-	BaseURL          string   `yaml:"base_url"`
-	OpenAIBaseURL    string   `yaml:"openai_base_url"`
-	ResponsesBaseURL string   `yaml:"responses_base_url"` // OpenAI Responses API base (for Codex CLI direct passthrough)
-	APIKey           string   `yaml:"api_key"`
-	Models           []string `yaml:"models"`
-	Proxy            *bool    `yaml:"proxy,omitempty"` // nil=inherit global, true=use proxy, false=direct
+	Name             string                `yaml:"name"`
+	Prefix           string                `yaml:"prefix"`
+	BaseURL          string                `yaml:"base_url"`
+	OpenAIBaseURL    string                `yaml:"openai_base_url"`
+	ResponsesBaseURL string                `yaml:"responses_base_url"` // OpenAI Responses API base (for Codex CLI direct passthrough)
+	APIKey           string                `yaml:"api_key"`
+	ModelConfigs     []ProviderModelConfig `yaml:"models"`
+	Proxy            *bool                 `yaml:"proxy,omitempty"` // nil=inherit global, true=use proxy, false=direct
+}
+
+func (p ProviderConfig) MarshalYAML() (interface{}, error) {
+	return struct {
+		Name             string                `yaml:"name"`
+		Prefix           string                `yaml:"prefix"`
+		BaseURL          string                `yaml:"base_url"`
+		OpenAIBaseURL    string                `yaml:"openai_base_url"`
+		ResponsesBaseURL string                `yaml:"responses_base_url"`
+		APIKey           string                `yaml:"api_key"`
+		Models           []ProviderModelConfig `yaml:"models"`
+		Proxy            *bool                 `yaml:"proxy,omitempty"`
+	}{
+		Name: p.Name, Prefix: p.Prefix, BaseURL: p.BaseURL,
+		OpenAIBaseURL: p.OpenAIBaseURL, ResponsesBaseURL: p.ResponsesBaseURL,
+		APIKey: p.APIKey, Models: p.ModelConfigs, Proxy: p.Proxy,
+	}, nil
 }
 
 // ModelSlotsConfig maps Claude Code model slots to "prefix/model" identifiers.
@@ -114,15 +173,15 @@ type SnapshotCodex struct {
 }
 
 type ProviderSnapshot struct {
-	Name             string   `json:"name"`
-	Prefix           string   `json:"prefix"`
-	BaseURL          string   `json:"base_url"`
-	OpenAIBaseURL    string   `json:"openai_base_url"`
-	ResponsesBaseURL string   `json:"responses_base_url"`
-	APIKey           *string  `json:"api_key,omitempty"`
-	APIKeySet        bool     `json:"api_key_set"`
-	Models           []string `json:"models"`
-	Proxy            *bool    `json:"proxy"`
+	Name             string                `json:"name"`
+	Prefix           string                `json:"prefix"`
+	BaseURL          string                `json:"base_url"`
+	OpenAIBaseURL    string                `json:"openai_base_url"`
+	ResponsesBaseURL string                `json:"responses_base_url"`
+	APIKey           *string               `json:"api_key,omitempty"`
+	APIKeySet        bool                  `json:"api_key_set"`
+	Models           []ProviderModelConfig `json:"models"`
+	Proxy            *bool                 `json:"proxy"`
 }
 
 type FieldError struct {
@@ -136,7 +195,7 @@ func NewSnapshot(cfg *Config) Snapshot {
 		providers[index] = ProviderSnapshot{
 			Name: provider.Name, Prefix: provider.Prefix, BaseURL: provider.BaseURL,
 			OpenAIBaseURL: provider.OpenAIBaseURL, ResponsesBaseURL: provider.ResponsesBaseURL,
-			APIKeySet: provider.APIKey != "", Models: provider.Models, Proxy: provider.Proxy,
+			APIKeySet: provider.APIKey != "", Models: provider.ModelConfigs, Proxy: provider.Proxy,
 		}
 	}
 	return Snapshot{
@@ -189,7 +248,7 @@ func (s Snapshot) Resolve(existing *Config) (*Config, []FieldError) {
 		resolved.Providers[index] = ProviderConfig{
 			Name: provider.Name, Prefix: provider.Prefix, BaseURL: provider.BaseURL,
 			OpenAIBaseURL: provider.OpenAIBaseURL, ResponsesBaseURL: provider.ResponsesBaseURL,
-			APIKey: apiKey, Models: provider.Models, Proxy: provider.Proxy,
+			APIKey: apiKey, ModelConfigs: provider.Models, Proxy: provider.Proxy,
 		}
 	}
 	if err := resolved.Validate(); err != nil {
@@ -271,7 +330,6 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("YAML 解析错误 — %w", err)
 	}
-
 	cfg.Log.Dir = expandHome(cfg.Log.Dir)
 	return cfg, nil
 }
@@ -314,17 +372,38 @@ func (c *Config) Validate() error {
 		if p.BaseURL == "" && p.OpenAIBaseURL == "" && p.ResponsesBaseURL == "" {
 			return fmt.Errorf("providers[%d] (%s): 至少需要一个 API 端点", i, p.Prefix)
 		}
+		seenModels := make(map[string]map[string]bool)
+		for modelIndex, model := range p.ModelConfigs {
+			if strings.TrimSpace(model.ID) == "" {
+				return fmt.Errorf("providers[%d].models[%d].id: model id cannot be empty", i, modelIndex)
+			}
+			if len(model.Endpoints) == 0 {
+				return fmt.Errorf("providers[%d].models[%d].endpoints: at least one endpoint is required", i, modelIndex)
+			}
+			for _, endpoint := range model.Endpoints {
+				if !providerHasEndpoint(p, endpoint) {
+					return fmt.Errorf("providers[%d].models[%d].endpoints: endpoint %q has no configured base URL", i, modelIndex, endpoint)
+				}
+				if seenModels[model.ID] == nil {
+					seenModels[model.ID] = make(map[string]bool)
+				}
+				if seenModels[model.ID][endpoint] {
+					return fmt.Errorf("providers[%d].models[%d]: duplicate model %q for endpoint %q", i, modelIndex, model.ID, endpoint)
+				}
+				seenModels[model.ID][endpoint] = true
+			}
+		}
 	}
 
 	// Build set of valid model IDs for slot validation
 	valid := make(map[string]bool)
 	for _, p := range c.Providers {
-		for _, m := range p.Models {
-			valid[p.Prefix+"/"+m] = true
-			// Also check [1m]-stripped variant
-			if strings.HasSuffix(m, "[1m]") {
-				valid[p.Prefix+"/"+strings.TrimSuffix(m, "[1m]")] = true
+		for _, model := range p.ModelConfigs {
+			if !containsString(model.Endpoints, "anthropic") {
+				continue
 			}
+			m := model.ID
+			valid[p.Prefix+"/"+m] = true
 		}
 	}
 
@@ -346,6 +425,28 @@ func (c *Config) Validate() error {
 	checkSlot("fable", c.ModelSlots.Fable)
 
 	return nil
+}
+
+func providerHasEndpoint(provider ProviderConfig, endpoint string) bool {
+	switch endpoint {
+	case "anthropic":
+		return provider.BaseURL != ""
+	case "openai":
+		return provider.OpenAIBaseURL != ""
+	case "responses":
+		return provider.ResponsesBaseURL != ""
+	default:
+		return false
+	}
+}
+
+func containsString(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 func RenderUpdate(original []byte, proposed *Config) ([]byte, error) {

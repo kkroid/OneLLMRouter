@@ -4,7 +4,7 @@ param(
     [switch]$TestOnly,
     [switch]$Desktop,
     [switch]$Installer,
-    [string]$Version = "1.5.0",
+    [string]$Version = "1.5.1",
     [string]$QtRoot = $env:QT_ROOT,
     [string]$StageDirectory = "",
     [string]$CMake = "cmake",
@@ -132,7 +132,8 @@ try {
 
         $windeployQt = Join-Path $qtRootFull "bin\windeployqt.exe"
         if (-not (Test-Path -LiteralPath $windeployQt -PathType Leaf)) { throw "windeployqt not found: $windeployQt" }
-        & $windeployQt --release --no-translations $trayDestination
+        & $windeployQt --release --no-translations --no-system-dxc-compiler `
+            --no-compiler-runtime $trayDestination
         if ($LASTEXITCODE -ne 0) { throw "Qt deployment failed" }
 
         $vcRuntimeDirectory = Resolve-VcRuntimeDirectory

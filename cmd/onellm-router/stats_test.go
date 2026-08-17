@@ -111,11 +111,17 @@ func TestStatsCommandRejectsInvalidRange(t *testing.T) {
 	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "invalid ISO week") {
 		t.Fatalf("error = %v", err)
 	}
+
+	cmd = newStatsCmd(t.TempDir(), time.Now)
+	cmd.SetArgs([]string{"range", "2026-08-09", "2026-08-01"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "end date") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func TestRootCommandIncludesStatsPeriods(t *testing.T) {
 	root := newRootCmd()
-	for _, args := range [][]string{{"stats", "day"}, {"stats", "week"}, {"stats", "month"}} {
+	for _, args := range [][]string{{"stats", "day"}, {"stats", "week"}, {"stats", "month"}, {"stats", "range"}} {
 		command, _, err := root.Find(args)
 		if err != nil || command.Name() != args[1] {
 			t.Fatalf("Find(%v) = %v, %v", args, command, err)

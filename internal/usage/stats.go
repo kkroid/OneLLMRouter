@@ -17,6 +17,7 @@ const (
 	PeriodDay   Period = "day"
 	PeriodWeek  Period = "week"
 	PeriodMonth Period = "month"
+	PeriodRange Period = "range"
 )
 
 type Range struct {
@@ -100,6 +101,26 @@ func ParseRange(period Period, value string, now time.Time) (Range, error) {
 	default:
 		return Range{}, fmt.Errorf("unsupported stats period %q", period)
 	}
+}
+
+func ParseDateRange(startValue, endValue string) (Range, error) {
+	start, err := time.Parse("2006-01-02", startValue)
+	if err != nil {
+		return Range{}, fmt.Errorf("invalid range start %q: expected YYYY-MM-DD", startValue)
+	}
+	end, err := time.Parse("2006-01-02", endValue)
+	if err != nil {
+		return Range{}, fmt.Errorf("invalid range end %q: expected YYYY-MM-DD", endValue)
+	}
+	if end.Before(start) {
+		return Range{}, fmt.Errorf("invalid date range: end date must not be before start date")
+	}
+	return Range{
+		Period: PeriodRange,
+		Label:  startValue + " to " + endValue,
+		Start:  start,
+		End:    end.AddDate(0, 0, 1),
+	}, nil
 }
 
 func AggregateDir(baseDir string, selected Range) (StatsResult, error) {

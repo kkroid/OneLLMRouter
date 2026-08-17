@@ -23,6 +23,19 @@ QPushButton *button(const QString &text, const QString &name, QWidget *parent)
     return result;
 }
 
+QString selectedModelEndpoint(int protocolIndex)
+{
+    switch (ModelProtocol(protocolIndex)) {
+    case ModelProtocol::Anthropic:
+        return "anthropic";
+    case ModelProtocol::OpenAIChat:
+        return "openai";
+    case ModelProtocol::OpenAIResponses:
+        return "responses";
+    }
+    return {};
+}
+
 } // namespace
 
 MainWindow::MainWindow(ConfigClient *client, bool readOnly, QWidget *parent,
@@ -163,9 +176,39 @@ void MainWindow::buildUi()
             return;
         }
         int added = 0;
+        const QString endpoint = selectedModelEndpoint(m_protocol->currentIndex());
         for (const QString &model : models) {
-            if (!m_snapshot.providers[row].models.contains(model)) {
+            bool assigned = false;
+            for (int modelIndex = 0;
+                 modelIndex < m_snapshot.providers[row].models.size();
+                 ++modelIndex) {
+                if (m_snapshot.providers[row].models.at(modelIndex) != model ||
+                    modelIndex >= m_snapshot.providers[row].modelDefinitions.size())
+                    continue;
+                const QJsonValue definition =
+                    m_snapshot.providers[row].modelDefinitions.at(modelIndex);
+                if (!definition.isObject()) continue;
+                QJsonObject object = definition.toObject();
+                QJsonArray endpoints = object.value("endpoints").toArray();
+                if (endpoints.contains(endpoint)) {
+                    assigned = true;
+                    break;
+                }
+                const QString upstreamModel =
+                    object.value("upstream_model").toString();
+                if (!upstreamModel.isEmpty() && upstreamModel != model) continue;
+                endpoints.append(endpoint);
+                object.insert("endpoints", endpoints);
+                m_snapshot.providers[row].modelDefinitions[modelIndex] = object;
+                ++added;
+                assigned = true;
+                break;
+            }
+            if (!assigned) {
                 m_snapshot.providers[row].models.append(model);
+                m_snapshot.providers[row].modelDefinitions.append(
+                    QJsonObject{{"id", model},
+                                {"endpoints", QJsonArray{endpoint}}});
                 ++added;
             }
         }
@@ -311,7 +354,6 @@ void MainWindow::refreshModels()
     m_modelList->clear();
     const int row = m_providerList->currentRow();
     if (row < 0) return;
-    m_snapshot.providers[row].models.sort();
     m_modelList->addItems(m_snapshot.providers[row].models);
     if (m_modelList->count()) m_modelList->setCurrentRow(0);
 }
@@ -349,7 +391,12 @@ void MainWindow::addModel()
     const int row = m_providerList->currentRow();
     const QString model = m_modelName->text().trimmed();
     if (row >= 0 && !model.isEmpty() && !m_snapshot.providers[row].models.contains(model)) {
-        m_snapshot.providers[row].models.append(model); m_modelName->clear(); refreshModels();
+        m_snapshot.providers[row].models.append(model);
+        m_snapshot.providers[row].modelDefinitions.append(
+            QJsonObject{{"id", model},
+                        {"endpoints", QJsonArray{selectedModelEndpoint(
+                                          m_protocol->currentIndex())}}});
+        m_modelName->clear(); refreshModels();
         refreshDraftConsumers();
         setDirty(true);
     }
@@ -359,7 +406,10 @@ void MainWindow::removeModel()
 {
     const int provider = m_providerList->currentRow();
     if (provider >= 0 && m_modelList->currentRow() >= 0) {
-        m_snapshot.providers[provider].models.removeAll(m_modelList->currentItem()->text());
+        const int modelIndex = m_modelList->currentRow();
+        m_snapshot.providers[provider].models.removeAt(modelIndex);
+        if (modelIndex < m_snapshot.providers[provider].modelDefinitions.size())
+            m_snapshot.providers[provider].modelDefinitions.removeAt(modelIndex);
         refreshModels();
         refreshDraftConsumers();
         setDirty(true);

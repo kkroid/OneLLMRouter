@@ -76,7 +76,7 @@ func TestConfigValidateAcceptsCodexOverwriteCatalog(t *testing.T) {
 	var output bytes.Buffer
 	cmd := configValidateCmd()
 	cmd.SetArgs([]string{"--json"})
-	cmd.SetIn(bytes.NewBufferString(`{"providers":[{"name":"Alpha","prefix":"alpha","base_url":"https://example.invalid","openai_base_url":"","responses_base_url":"","api_key_set":true,"models":["model"],"proxy":null}],"codex":{"overwrite_catalog":true,"models":{}},"model_slots":{"default":"alpha/model"}}`))
+	cmd.SetIn(bytes.NewBufferString(`{"providers":[{"name":"Alpha","prefix":"alpha","base_url":"https://example.invalid","openai_base_url":"","responses_base_url":"","api_key_set":true,"models":[{"id":"model","endpoints":["anthropic"]}],"proxy":null}],"codex":{"overwrite_catalog":true,"models":{}},"model_slots":{"default":"alpha/model"}}`))
 	cmd.SetOut(&output)
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)

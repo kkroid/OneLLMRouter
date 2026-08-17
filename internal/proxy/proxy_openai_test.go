@@ -58,6 +58,31 @@ func TestOpenAI_DirectNonStream(t *testing.T) {
 	}
 }
 
+func TestOpenAIUsesAnthropicRouteWhenModelExcludesDirectChat(t *testing.T) {
+	mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/messages" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		io.WriteString(w, `{"id":"message","type":"message","role":"assistant","model":"claude-model","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer mockAPI.Close()
+
+	resolver := router.NewResolver([]router.Provider{{
+		Prefix: "mixed", BaseURL: mockAPI.URL, OpenAIBaseURL: "http://unused",
+		ModelRoutes: []router.ModelRoute{{
+			ID: "claude-model", Endpoints: []router.EndpointType{router.EndpointAnthropic},
+		}},
+	}})
+	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"mixed/claude-model","messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeOpenAI(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestOpenAIUsageCollectionDirectAndTranslated(t *testing.T) {
 	t.Run("direct explicit zero", func(t *testing.T) {
 		mockAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +176,10 @@ func TestOpenAIDirectPreservesProviderSpecificFields(t *testing.T) {
 	defer mockAPI.Close()
 
 	resolver := router.NewResolver([]router.Provider{{
-		Prefix: "ds", OpenAIBaseURL: mockAPI.URL, APIKey: "provider-secret", Models: []string{"m1[1m]"},
+		Prefix: "ds", OpenAIBaseURL: mockAPI.URL, APIKey: "provider-secret",
+		ModelRoutes: []router.ModelRoute{{
+			ID: "m1[1m]", Endpoints: []router.EndpointType{router.EndpointOpenAI},
+		}},
 	}})
 	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler))
 	requestBody := `{
@@ -170,7 +198,7 @@ func TestOpenAIDirectPreservesProviderSpecificFields(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	assertJSONFieldEqual(t, forwarded, "model", `"m1"`)
+	assertJSONFieldEqual(t, forwarded, "model", `"m1[1m]"`)
 	assertJSONFieldEqual(t, forwarded, "response_format", `{"type":"json_schema","json_schema":{"name":"probe","strict":true,"schema":{"type":"object"}}}`)
 	assertJSONFieldEqual(t, forwarded, "thinking", `{"type":"disabled"}`)
 	assertJSONFieldEqual(t, forwarded, "tools", `[{"type":"function","function":{"name":"emit","parameters":{"type":"object"},"strict":true}}]`)
@@ -319,7 +347,10 @@ func TestOpenAIDirectRetriesWithRebuiltRequest(t *testing.T) {
 	defer mockAPI.Close()
 
 	resolver := router.NewResolver([]router.Provider{{
-		Prefix: "ds", OpenAIBaseURL: mockAPI.URL, APIKey: "provider-secret", Models: []string{"m1[1m]"},
+		Prefix: "ds", OpenAIBaseURL: mockAPI.URL, APIKey: "provider-secret",
+		ModelRoutes: []router.ModelRoute{{
+			ID: "m1[1m]", Endpoints: []router.EndpointType{router.EndpointOpenAI},
+		}},
 	}})
 	handler := NewHandler(resolver, mockAPI.Client(), mockAPI.Client(), slog.New(slog.DiscardHandler), newRetryTestExecutor(2))
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"ds/m1[1m]","messages":[{"role":"user","content":"hi"}]}`))
@@ -333,8 +364,8 @@ func TestOpenAIDirectRetriesWithRebuiltRequest(t *testing.T) {
 	if calls != 2 || len(requestBodies) != 2 || requestBodies[0] != requestBodies[1] {
 		t.Fatalf("calls = %d, request bodies = %#v", calls, requestBodies)
 	}
-	if strings.Contains(requestBodies[0], "[1m]") || !strings.Contains(requestBodies[0], `"model":"m1"`) {
-		t.Fatalf("direct model was not stripped before retries: %s", requestBodies[0])
+	if !strings.Contains(requestBodies[0], `"model":"m1[1m]"`) {
+		t.Fatalf("direct model was not preserved before retries: %s", requestBodies[0])
 	}
 }
 

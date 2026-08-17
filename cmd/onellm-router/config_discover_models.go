@@ -118,7 +118,7 @@ func discoverProviderModels(ctx context.Context, cfg *config.Config, provider ro
 		}
 		return directClient
 	})
-	provider.Models = nil
+	provider.ModelRoutes = nil
 	result := service.List(ctx, []router.Provider{provider}, endpoint)
 	if len(result.Errors) != 0 {
 		return nil, result.Errors[0].Err

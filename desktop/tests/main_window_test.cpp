@@ -24,6 +24,7 @@ private slots:
     void editsPersistAcrossProviderSwitchAndRequestRestart();
     void validationErrorKeepsEditorOpen();
     void discoveryLocksProviderAndReportsMerge();
+    void discoveryKeepsIncompatibleEndpointMappingsSeparate();
     void noOpSavePreservesReasoningModels();
     void existingKeyIsUsedForDiscovery();
     void claudeApplySavesSelectedSlotFirst();
@@ -53,7 +54,9 @@ static QByteArray clientTestConfig()
 {
     return "server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
            "  - name: Alpha\n    prefix: alpha\n    base_url: https://alpha.invalid\n"
-           "    api_key: fake-key\n    models: [old-model, new-model]\n"
+           "    api_key: fake-key\n    models:\n"
+           "      - {id: old-model, endpoints: [anthropic]}\n"
+           "      - {id: new-model, endpoints: [anthropic]}\n"
            "codex:\n  models: {}\nmodel_slots:\n  default: alpha/old-model\n"
            "  opus: alpha/old-model\n  sonnet: alpha/old-model\n"
            "  haiku: alpha/old-model\n  fable: alpha/old-model\n";
@@ -119,8 +122,8 @@ void MainWindowTest::editsPersistAcrossProviderSwitchAndRequestRestart()
     QFile config(path);
     QVERIFY(config.open(QIODevice::WriteOnly));
     config.write("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
-                 "  - {name: Alpha, prefix: alpha, base_url: https://alpha.invalid, api_key: alpha-key, models: [a]}\n"
-                 "  - {name: Beta, prefix: beta, base_url: https://beta.invalid, api_key: beta-key, models: [b]}\n"
+                 "  - {name: Alpha, prefix: alpha, base_url: https://alpha.invalid, api_key: alpha-key, models: [{id: a, endpoints: [anthropic]}]}\n"
+                 "  - {name: Beta, prefix: beta, base_url: https://beta.invalid, api_key: beta-key, models: [{id: b, endpoints: [anthropic]}]}\n"
                  "codex:\n  models: {}\nmodel_slots: {}\n");
     config.close();
 
@@ -162,7 +165,9 @@ void MainWindowTest::validationErrorKeepsEditorOpen()
     const QByteArray original =
         "server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
         "  - name: Alpha\n    prefix: alpha\n    base_url: https://old.invalid\n"
-        "    api_key: old-secret\n    models: [old]\ncodex:\n  models: {}\nmodel_slots: {}\n";
+        "    api_key: old-secret\n    models:\n"
+        "      - {id: old, endpoints: [anthropic]}\n"
+        "codex:\n  models: {}\nmodel_slots: {}\n";
     file.write(original);
     file.close();
 
@@ -209,8 +214,8 @@ void MainWindowTest::discoveryLocksProviderAndReportsMerge()
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write(QString("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
-                       "  - {name: Alpha, prefix: alpha, base_url: 'http://127.0.0.1:%1', proxy: false, models: [old-a]}\n"
-                       "  - {name: Beta, prefix: beta, base_url: https://beta.invalid, proxy: false, models: [old-b]}\n"
+                       "  - {name: Alpha, prefix: alpha, base_url: 'http://127.0.0.1:%1', proxy: false, models: [{id: old-a, endpoints: [anthropic]}]}\n"
+                       "  - {name: Beta, prefix: beta, base_url: https://beta.invalid, proxy: false, models: [{id: old-b, endpoints: [anthropic]}]}\n"
                        "codex:\n  models: {}\nmodel_slots: {}\n")
                    .arg(server.serverPort()).toUtf8());
     file.close();
@@ -228,6 +233,64 @@ void MainWindowTest::discoveryLocksProviderAndReportsMerge()
     QCOMPARE(models->findItems("discovered-a", Qt::MatchExactly).size(), 1);
 }
 
+void MainWindowTest::discoveryKeepsIncompatibleEndpointMappingsSeparate()
+{
+    const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    connect(&server, &QTcpServer::newConnection, &server, [&] {
+        QTcpSocket *socket = server.nextPendingConnection();
+        connect(socket, &QTcpSocket::readyRead, socket, [socket] {
+            socket->readAll();
+            const QByteArray body = "{\"data\":[{\"id\":\"shared-model\"}]}";
+            socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                          + QByteArray::number(body.size())
+                          + "\r\nConnection: close\r\n\r\n" + body);
+            socket->disconnectFromHost();
+        });
+    });
+    QTemporaryDir directory;
+    const QString path = directory.filePath("router.yaml");
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(QString(
+        "server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
+        "  - name: Alpha\n    prefix: alpha\n"
+        "    base_url: http://127.0.0.1:%1\n"
+        "    responses_base_url: http://127.0.0.1:%1\n"
+        "    proxy: false\n    models:\n"
+        "      - id: shared-model\n        endpoints: [anthropic]\n"
+        "        upstream_model: anthropic-model\n"
+        "codex:\n  models: {}\nmodel_slots: {}\n")
+        .arg(server.serverPort()).toUtf8());
+    file.close();
+
+    ConfigClient client(core, path);
+    MainWindow window(&client);
+    auto *protocol = window.findChild<QComboBox *>("discoveryProtocol");
+    auto *status = window.findChild<QLabel *>("statusLabel");
+    QVERIFY(protocol && status);
+    protocol->setCurrentIndex(int(ModelProtocol::OpenAIResponses));
+    QTest::mouseClick(window.findChild<QPushButton *>("discoverModels"), Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().contains("Found 1 models; added 1"), 3000);
+    QTest::mouseClick(window.findChild<QPushButton *>("saveConfig"), Qt::LeftButton);
+
+    ConfigSnapshot reloaded;
+    QVERIFY(client.load(&reloaded).succeeded);
+    QCOMPARE(reloaded.providers[0].modelDefinitions.size(), 2);
+    const QJsonObject anthropic =
+        reloaded.providers[0].modelDefinitions.at(0).toObject();
+    const QJsonObject responses =
+        reloaded.providers[0].modelDefinitions.at(1).toObject();
+    QCOMPARE(anthropic.value("upstream_model").toString(),
+             QString("anthropic-model"));
+    QCOMPARE(anthropic.value("endpoints").toArray(),
+             QJsonArray{"anthropic"});
+    QCOMPARE(responses.value("endpoints").toArray(),
+             QJsonArray{"responses"});
+    QVERIFY(responses.value("upstream_model").toString().isEmpty());
+}
+
 void MainWindowTest::noOpSavePreservesReasoningModels()
 {
     const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
@@ -237,7 +300,7 @@ void MainWindowTest::noOpSavePreservesReasoningModels()
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
-               "  - {name: Alpha, prefix: alpha, base_url: https://alpha.invalid, models: [plain-model]}\n"
+               "  - {name: Alpha, prefix: alpha, base_url: https://alpha.invalid, models: [{id: plain-model, endpoints: [anthropic]}]}\n"
                "codex:\n  models:\n    configured-model:\n      default_reasoning_level: medium\n"
                "      supported_reasoning_levels: [low, medium]\nmodel_slots: {}\n");
     file.close();
@@ -285,7 +348,8 @@ void MainWindowTest::existingKeyIsUsedForDiscovery()
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write(QString("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
                        "  - name: Alpha\n    prefix: alpha\n    base_url: http://127.0.0.1:%1\n"
-                       "    api_key: existing-secret\n    proxy: false\n    models: [model]\n"
+                       "    api_key: existing-secret\n    proxy: false\n"
+                       "    models:\n      - {id: model, endpoints: [anthropic]}\n"
                        "codex:\n  models: {}\nmodel_slots: {}\n")
                    .arg(server.serverPort()).toUtf8());
     file.close();

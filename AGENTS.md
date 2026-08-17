@@ -6,7 +6,7 @@ OneLLMRouter is a local multi-provider gateway for Claude Code, Codex, and compa
 Configure providers once, keep all configured providers in the model catalog, and select a namespaced
 `provider/model` from the client. Do not introduce a separate runtime Provider-switching state.
 
-The current product work is tracked in [the v1.5.0 plan](docs/superpowers/specs/2026-08-09-v1.5.0-plan.md).
+The current product work is tracked in [the v1.5.1 plan](docs/superpowers/specs/2026-08-14-v1.5.1-plan.md).
 That plan is a design target, not permission to implement every item in one change.
 
 ## Repository Map

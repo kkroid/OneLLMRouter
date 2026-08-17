@@ -90,8 +90,15 @@ ConfigResult ConfigClient::load(ConfigSnapshot *snapshot) const
         provider.openAIBaseUrl = object.value("openai_base_url").toString();
         provider.responsesBaseUrl = object.value("responses_base_url").toString();
         provider.apiKeySet = object.value("api_key_set").toBool();
-        for (const QJsonValue &model : object.value("models").toArray())
-            provider.models.append(model.toString());
+        for (const QJsonValue &model : object.value("models").toArray()) {
+            if (model.isObject()) {
+                const QString id = model.toObject().value("id").toString();
+                if (!id.isEmpty()) {
+                    provider.models.append(id);
+                    provider.modelDefinitions.append(model);
+                }
+            }
+        }
         if (object.value("proxy").isBool())
             provider.proxy = object.value("proxy").toBool()
                 ? ProviderConfigSnapshot::ProxyPolicy::UseProxy
@@ -123,7 +130,14 @@ QByteArray ConfigClient::serialize(const ConfigSnapshot &snapshot,
     for (int index = 0; index < snapshot.providers.size(); ++index) {
         const ProviderConfigSnapshot &provider = snapshot.providers[index];
         QJsonArray models;
-        for (const QString &model : provider.models) models.append(model);
+        for (int modelIndex = 0; modelIndex < provider.models.size(); ++modelIndex) {
+            QJsonObject definition;
+            if (modelIndex < provider.modelDefinitions.size() &&
+                provider.modelDefinitions.at(modelIndex).isObject())
+                definition = provider.modelDefinitions.at(modelIndex).toObject();
+            definition.insert("id", provider.models.at(modelIndex));
+            models.append(definition);
+        }
         QJsonObject object{{"name", provider.name}, {"prefix", provider.prefix},
                            {"base_url", provider.baseUrl},
                            {"openai_base_url", provider.openAIBaseUrl},

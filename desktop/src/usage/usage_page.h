@@ -5,9 +5,10 @@
 #include <QObject>
 #include <QWidget>
 
+class QCalendarWidget;
 class QComboBox;
 class QLabel;
-class QLineEdit;
+class QPushButton;
 class QTableView;
 
 class UsageClient : public QObject
@@ -15,7 +16,8 @@ class UsageClient : public QObject
     Q_OBJECT
 public:
     explicit UsageClient(QString executable, QObject *parent = nullptr);
-    virtual UsageResult load(const QString &period, const QString &label) const;
+    virtual UsageResult load(const QString &period, const QString &start = {},
+                             const QString &end = {}) const;
 
 private:
     QString m_executable;
@@ -32,14 +34,18 @@ public slots:
     void refresh();
 
 private:
-    void updateRangePlaceholder();
+    void updateDateControl();
     void updateFilters();
     void applyFilters();
 
     UsageClient *m_client;
     UsageModel *m_model;
     QComboBox *m_period;
-    QLineEdit *m_range;
+    QWidget *m_customRange;
+    QPushButton *m_startDate;
+    QPushButton *m_endDate;
+    QCalendarWidget *m_startCalendar;
+    QCalendarWidget *m_endCalendar;
     QComboBox *m_provider;
     QComboBox *m_requestedModel;
     QLabel *m_status;

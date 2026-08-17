@@ -47,6 +47,75 @@ func TestSnapshotResolvePreservesKeyByPrefix(t *testing.T) {
 	}
 }
 
+func TestLoadEndpointScopedModels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "onellm-router.yaml")
+	data := []byte(`server:
+  host: 127.0.0.1
+  http_port: 3456
+providers:
+  - prefix: ds
+    base_url: https://api.example/anthropic
+    responses_base_url: https://api.example
+    api_key: secret
+    models:
+      - id: deepseek-v4-pro[1m]
+        endpoints: [anthropic]
+      - id: deepseek-v4-pro
+        endpoints: [responses]
+        upstream_model: deepseek-v4-pro
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := cfg.Providers[0].ModelConfigs
+	if len(models) != 2 || models[0].ID != "deepseek-v4-pro[1m]" ||
+		!reflect.DeepEqual(models[0].Endpoints, []string{"anthropic"}) ||
+		models[1].UpstreamModel != "deepseek-v4-pro" {
+		t.Fatalf("models = %+v", models)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() = %v", err)
+	}
+}
+
+func TestLoadRejectsStringModels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "onellm-router.yaml")
+	data := []byte("providers:\n  - prefix: ds\n    base_url: https://api.example/anthropic\n    models: [deepseek-v4-pro]\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "model must be an object") {
+		t.Fatalf("Load() = %v", err)
+	}
+}
+
+func TestValidateRequiresModelEndpoints(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers = []ProviderConfig{{
+		Prefix: "ds", BaseURL: "https://api.example/anthropic",
+		ModelConfigs: []ProviderModelConfig{{ID: "model"}},
+	}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "at least one endpoint") {
+		t.Fatalf("Validate() = %v", err)
+	}
+}
+
+func TestValidateRejectsModelEndpointWithoutBaseURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers = []ProviderConfig{{
+		Prefix: "ds", BaseURL: "https://api.example/anthropic",
+		ModelConfigs: []ProviderModelConfig{{ID: "model", Endpoints: []string{"responses"}}},
+	}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "responses") {
+		t.Fatalf("Validate() = %v", err)
+	}
+}
+
 func TestSnapshotAppliesOnlyCodexOverwriteCatalogAndModels(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -186,7 +255,7 @@ func TestDefaultConfigOverwritesCodexCatalog(t *testing.T) {
 func TestValidateRequiresProviderEndpointRegardlessOfPrefix(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Providers = []ProviderConfig{{
-		Name: "ordinary cp prefix", Prefix: "cp", Models: []string{"m1"},
+		Name: "ordinary cp prefix", Prefix: "cp",
 	}}
 
 	if err := cfg.Validate(); err == nil {

@@ -94,7 +94,9 @@ providers:
     responses_base_url: "http://127.0.0.1:9"
     api_key: "test-only"
     proxy: false
-    models: ["gpt-5.6-sol"]
+    models:
+      - id: "gpt-5.6-sol"
+        endpoints: [responses]
 "@
     Set-Content -LiteralPath $configPath -Value $config -Encoding utf8NoBOM
 

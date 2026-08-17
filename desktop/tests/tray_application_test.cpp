@@ -20,6 +20,7 @@ private slots:
     void explicitStopDisablesAutomaticRestart();
     void explicitStopSuppressesAutoStartWhenStopRequestFails();
     void ownedHealthMustMatchChildPid();
+    void formatsTrayTooltipVersion();
     void selectsEnglishAndChineseStrings();
     void distinguishesUnknownAndDisabledProxy();
     void rateLimitsIdenticalNotifications();
@@ -128,6 +129,19 @@ void TrayApplicationTest::ownedHealthMustMatchChildPid()
     QVERIFY(healthMatchesOwnedProcess(ProcessOwnership::Owned, 42, health));
     QVERIFY(!healthMatchesOwnedProcess(ProcessOwnership::Owned, 43, health));
     QVERIFY(!healthMatchesOwnedProcess(ProcessOwnership::External, 42, health));
+}
+
+void TrayApplicationTest::formatsTrayTooltipVersion()
+{
+    QCOMPARE(trayToolTipText(RouterState::Healthy, "Healthy", "1.5.1", "fallback"),
+             QString::fromUtf8("OneLLMRouter - Healthy · v1.5.1"));
+    QCOMPARE(trayToolTipText(RouterState::Healthy, QString::fromUtf8("健康"),
+                             "v1.5.1", "fallback"),
+             QString::fromUtf8("OneLLMRouter - 健康 · v1.5.1"));
+    QCOMPARE(trayToolTipText(RouterState::Healthy, "Healthy", {}, "1.5.1"),
+             QString::fromUtf8("OneLLMRouter - Healthy · v1.5.1"));
+    QCOMPARE(trayToolTipText(RouterState::Stopped, "Stopped", "1.5.1", "fallback"),
+             QString("OneLLMRouter - Stopped"));
 }
 
 void TrayApplicationTest::selectsEnglishAndChineseStrings()

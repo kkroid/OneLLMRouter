@@ -158,8 +158,8 @@ func configuredResponsesModel(cfg *config.Config, catalogPath, selected string) 
 		if provider.Prefix != prefix || provider.ResponsesBaseURL == "" {
 			continue
 		}
-		for _, configured := range provider.Models {
-			if configured == model {
+		for _, configured := range router.FromConfig([]config.ProviderConfig{provider})[0].ConfiguredModelRoutes() {
+			if configured.SupportsEndpoint(router.EndpointResponses) && configured.ID == model {
 				return true
 			}
 		}

@@ -73,9 +73,12 @@ func (s *Service) List(ctx context.Context, providers []router.Provider, endpoin
 			continue
 		}
 
-		if len(provider.Models) > 0 {
-			for _, modelID := range provider.Models {
-				s.appendModel(&result, seen, provider, upstreamModel{ID: modelID, Created: 1}, endpoint)
+		routes := provider.ConfiguredModelRoutes()
+		if len(routes) > 0 {
+			for _, route := range routes {
+				if route.SupportsEndpoint(endpoint) {
+					s.appendModel(&result, seen, provider, upstreamModel{ID: route.ID, Created: 1}, endpoint)
+				}
 			}
 			continue
 		}

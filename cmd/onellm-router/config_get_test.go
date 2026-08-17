@@ -56,7 +56,8 @@ providers:
     prefix: alpha
     base_url: https://example.invalid
     api_key: old-secret
-    models: [model]
+    models:
+      - {id: model, endpoints: [anthropic]}
 codex:
   overwrite_catalog: false
   models:

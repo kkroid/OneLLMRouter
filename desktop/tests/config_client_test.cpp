@@ -13,6 +13,7 @@ class ConfigClientTest : public QObject
     Q_OBJECT
 private slots:
     void coreRoundTripIsSecretSafe();
+    void endpointModelDefinitionsSurviveRoundTrip();
     void clientCommandsUseCoreContracts();
     void discoversProtocolModels_data();
     void discoversProtocolModels();
@@ -48,7 +49,9 @@ void ConfigClientTest::coreRoundTripIsSecretSafe()
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
                "  - name: Alpha\n    prefix: alpha\n    base_url: https://old.invalid\n"
-               "    api_key: old-secret\n    models: [old]\ncodex:\n  models: {}\nmodel_slots: {}\n");
+               "    api_key: old-secret\n    models:\n"
+               "      - id: old\n        endpoints: [anthropic]\n"
+               "codex:\n  models: {}\nmodel_slots: {}\n");
     file.close();
 
     ConfigClient client(core, path);
@@ -58,6 +61,9 @@ void ConfigClientTest::coreRoundTripIsSecretSafe()
     QVERIFY(snapshot.providers[0].apiKeySet);
     snapshot.providers[0].name = "Updated";
     snapshot.providers[0].models = {"new-model"};
+    snapshot.providers[0].modelDefinitions = {
+        QJsonObject{{"id", "new-model"}, {"endpoints", QJsonArray{"anthropic"}}}
+    };
     snapshot.codexModels.insert("new-model", {"medium", {"low", "medium"}});
     snapshot.modelSlots.insert("default", "alpha/new-model");
     QVERIFY2(client.apply(snapshot).succeeded, "config-apply failed");
@@ -69,6 +75,42 @@ void ConfigClientTest::coreRoundTripIsSecretSafe()
     QCOMPARE(reloaded.modelSlots.value("default"), QString("alpha/new-model"));
     const QByteArray yaml = [&] { QFile applied(path); applied.open(QIODevice::ReadOnly); return applied.readAll(); }();
     QVERIFY(yaml.contains("old-secret"));
+}
+
+void ConfigClientTest::endpointModelDefinitionsSurviveRoundTrip()
+{
+    const QString core = qEnvironmentVariable("ONELLM_TEST_CORE");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath("router.yaml");
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
+               "  - name: DeepSeek\n    prefix: ds\n    base_url: https://api.invalid/anthropic\n"
+               "    responses_base_url: https://api.invalid\n    api_key: secret\n"
+               "    models:\n      - id: deepseek-v4-pro[1m]\n        endpoints: [anthropic]\n"
+               "      - id: deepseek-v4-pro\n        endpoints: [responses]\n"
+               "        upstream_model: deepseek-v4-pro\ncodex:\n  models: {}\nmodel_slots: {}\n");
+    file.close();
+
+    ConfigClient client(core, path);
+    ConfigSnapshot snapshot;
+    QVERIFY(client.load(&snapshot).succeeded);
+    QCOMPARE(snapshot.providers[0].models,
+             QStringList({"deepseek-v4-pro[1m]", "deepseek-v4-pro"}));
+    QCOMPARE(snapshot.providers[0].modelDefinitions.size(), 2);
+    QVERIFY(snapshot.providers[0].modelDefinitions.at(0).isObject());
+    snapshot.providers[0].name = "Updated";
+    QVERIFY(client.apply(snapshot).succeeded);
+
+    ConfigSnapshot reloaded;
+    QVERIFY(client.load(&reloaded).succeeded);
+    QCOMPARE(reloaded.providers[0].modelDefinitions.size(), 2);
+    const QJsonObject anthropic = reloaded.providers[0].modelDefinitions.at(0).toObject();
+    const QJsonObject responses = reloaded.providers[0].modelDefinitions.at(1).toObject();
+    QVERIFY(anthropic.value("endpoints").toArray().contains("anthropic"));
+    QVERIFY(responses.value("endpoints").toArray().contains("responses"));
+    QCOMPARE(responses.value("upstream_model").toString(), QString("deepseek-v4-pro"));
 }
 
 void ConfigClientTest::clientCommandsUseCoreContracts()
@@ -83,7 +125,8 @@ void ConfigClientTest::clientCommandsUseCoreContracts()
     config.write("server:\n  host: 127.0.0.1\n  http_port: 3456\nproviders:\n"
                  "  - name: Alpha\n    prefix: alpha\n    base_url: https://alpha.invalid\n"
                  "    responses_base_url: https://alpha.invalid\n    api_key: fake-key\n"
-                 "    models: [model]\ncodex:\n  overwrite_catalog: false\n  models: {}\n"
+                 "    models:\n      - id: model\n        endpoints: [anthropic, responses]\n"
+                 "codex:\n  overwrite_catalog: false\n  models: {}\n"
                  "model_slots:\n  default: alpha/model\n  opus: alpha/model\n"
                  "  sonnet: alpha/model\n  haiku: alpha/model\n  fable: alpha/model\n");
     config.close();
@@ -206,7 +249,8 @@ void ConfigClientTest::discoversProtocolModels()
         "  - name: Alpha\n    prefix: alpha\n    base_url: %1\n"
         "    openai_base_url: %1\n    responses_base_url: %1\n"
         "    api_key: replacement-key\n    proxy: false\n"
-        "    models: [configured-model]\ncodex:\n  models: {}\nmodel_slots: {}\n")
+        "    models:\n      - {id: configured-model, endpoints: [anthropic]}\n"
+        "codex:\n  models: {}\nmodel_slots: {}\n")
         .arg(base).toUtf8();
     config.write(original);
     config.close();

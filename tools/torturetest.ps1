@@ -607,7 +607,9 @@ providers:
     openai_base_url: "http://127.0.0.1:$MockPort/openai"
     api_key: "sk-mock"
     proxy: false
-    models: ["mock-model"]
+    models:
+      - id: "mock-model"
+        endpoints: [anthropic, openai]
 model_slots:
   default: "mk/mock-model"
   opus: "mk/mock-model"

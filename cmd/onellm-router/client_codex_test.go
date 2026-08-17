@@ -74,7 +74,7 @@ func TestCodexPreviewAcceptsDiscoveredCatalogModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	routerData = bytes.Replace(routerData, []byte("    models: [model]\n"), nil, 1)
+	routerData = bytes.Replace(routerData, []byte("    models:\n      - {id: model, endpoints: [responses]}\n"), nil, 1)
 	if err := os.WriteFile(paths.router, routerData, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,8 @@ providers:
     prefix: alpha
     responses_base_url: https://example.invalid/v1
     api_key: fake-key
-    models: [model]
+    models:
+      - {id: model, endpoints: [responses]}
 codex:
   overwrite_catalog: ` + map[bool]string{false: "false", true: "true"}[overwrite] + `
   models: {}

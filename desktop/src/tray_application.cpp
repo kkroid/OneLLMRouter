@@ -87,6 +87,19 @@ bool migrateLegacyAutoStart(QSettings &settings, const QString &command)
     return true;
 }
 
+QString trayToolTipText(RouterState state, const QString &stateText,
+                        const QString &coreVersion,
+                        const QString &fallbackVersion)
+{
+    QString text = QString("OneLLMRouter - %1").arg(stateText);
+    if (state != RouterState::Healthy) return text;
+    QString version = coreVersion.trimmed();
+    if (version.isEmpty()) version = fallbackVersion.trimmed();
+    if (version.isEmpty()) return text;
+    if (!version.startsWith('v', Qt::CaseInsensitive)) version.prepend('v');
+    return text + QString::fromUtf8(" · ") + version;
+}
+
 bool NotificationLimiter::shouldNotify(const QString &key, const QDateTime &now)
 {
     const auto previous = m_lastShown.constFind(key);
@@ -281,14 +294,13 @@ void TrayApplication::restartAfterConfigurationSave()
 
 void TrayApplication::setState(RouterState state, const QString &detail)
 {
-    if (m_state == state) return;
+    if (m_state == state) {
+        updateTrayPresentation();
+        return;
+    }
     const RouterState previous = m_state;
     m_state = state;
-    const QString icon = state == RouterState::Healthy ? ":/icons/green.ico"
-        : (state == RouterState::Starting || state == RouterState::Degraded)
-              ? ":/icons/yellow.ico" : ":/icons/red.ico";
-    m_trayIcon.setIcon(QIcon(icon));
-    m_trayIcon.setToolTip(QString("OneLLMRouter - %1").arg(stateText()));
+    updateTrayPresentation();
     const bool recovery = state == RouterState::Healthy && previous != RouterState::Healthy;
     const bool problem = state == RouterState::Stopped || state == RouterState::Degraded ||
                          state == RouterState::Conflict || state == RouterState::Error;
@@ -297,6 +309,16 @@ void TrayApplication::setState(RouterState state, const QString &detail)
         m_limiter.shouldNotify(key, QDateTime::currentDateTimeUtc()))
         m_trayIcon.showMessage("OneLLMRouter",
                                detail.isEmpty() ? stateText() : stateText() + ": " + detail);
+}
+
+void TrayApplication::updateTrayPresentation()
+{
+    const QString icon = m_state == RouterState::Healthy ? ":/icons/green.ico"
+        : (m_state == RouterState::Starting || m_state == RouterState::Degraded)
+              ? ":/icons/yellow.ico" : ":/icons/red.ico";
+    m_trayIcon.setIcon(QIcon(icon));
+    m_trayIcon.setToolTip(trayToolTipText(
+        m_state, stateText(), m_health.version, QString(ONELLM_VERSION)));
 }
 
 QString TrayApplication::stateText() const

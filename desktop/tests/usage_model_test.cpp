@@ -13,6 +13,7 @@ class UsageModelTest : public QObject
 private slots:
     void sharedFixtureMatchesCoreJson();
     void partialAndUnknownValuesStayDistinct();
+    void acceptsLegacyGroupWithoutRequestedModel();
     void rejectsMalformedJsonSource();
 };
 
@@ -63,9 +64,25 @@ void UsageModelTest::partialAndUnknownValuesStayDistinct()
     UsageModel model;
     model.setResult(result);
     QCOMPARE(model.data(model.index(0, UsageModel::InputTokens)).toString(), QString("0"));
-    QCOMPARE(model.data(model.index(0, UsageModel::OutputTokens)).toString(), QString("4 + unknown (2)"));
-    QCOMPARE(model.data(model.index(0, UsageModel::CacheReadTokens)).toString(), QString("Unknown (1)"));
-    QVERIFY(model.data(model.index(0, UsageModel::CacheReadTokens), Qt::ForegroundRole).isValid());
+    QCOMPARE(model.data(model.index(0, UsageModel::OutputTokens)).toString(), QString("4"));
+    QCOMPARE(model.data(model.index(0, UsageModel::CacheReadTokens)).toString(), QString("0"));
+    QVERIFY(!model.data(model.index(0, UsageModel::CacheReadTokens), Qt::ForegroundRole).isValid());
+
+    QCOMPARE(UsageModel::displayToken({1234, 0}), QString("1.2K"));
+    QCOMPARE(UsageModel::displayToken({1250000, 0}), QString("1.25M"));
+    QCOMPARE(UsageModel::displayToken({31375494, 5}), QString("31.38M"));
+    const QString tooltip = model.data(model.index(0, UsageModel::CacheReadTokens),
+                                       Qt::ToolTipRole).toString();
+    QCOMPARE(tooltip, QString("Tokens: 0"));
+}
+
+void UsageModelTest::acceptsLegacyGroupWithoutRequestedModel()
+{
+    const QByteArray json = R"({"range":{"period":"month","label":"2026-08"},"malformed_lines":0,"groups":[{"provider":"p","requested_model":"","upstream_model":"m","tokens":{"input_tokens":1,"output_tokens":2,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0},"unknown_tokens":{"input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0}}]})";
+    const UsageResult result = UsageModel::parse(json);
+    QVERIFY2(result.succeeded, qPrintable(result.error));
+    QCOMPARE(result.rows.size(), 1);
+    QCOMPARE(result.rows.first().requestedModel, QString("(not recorded)"));
 }
 
 void UsageModelTest::rejectsMalformedJsonSource()

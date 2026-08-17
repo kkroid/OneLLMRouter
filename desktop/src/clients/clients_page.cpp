@@ -20,6 +20,16 @@ QLabel *valueLabel(const QString &name, QWidget *parent)
     return label;
 }
 
+bool modelSupportsEndpoint(const ProviderConfigSnapshot &provider, int modelIndex,
+                           const QString &endpoint)
+{
+    if (provider.modelDefinitions.size() != provider.models.size()) return false;
+    const QJsonValue definition = provider.modelDefinitions.at(modelIndex);
+    if (!definition.isObject()) return false;
+    const QJsonArray endpoints = definition.toObject().value("endpoints").toArray();
+    return endpoints.contains(endpoint);
+}
+
 } // namespace
 
 ClientsPage::ClientsPage(ConfigClient *client, QWidget *parent)
@@ -109,10 +119,15 @@ void ClientsPage::setConfiguration(const ConfigSnapshot &snapshot)
     int configuredKeys = 0;
     for (const ProviderConfigSnapshot &provider : snapshot.providers) {
         if (provider.apiKeySet) ++configuredKeys;
-        for (const QString &model : provider.models) {
+        for (int modelIndex = 0; modelIndex < provider.models.size(); ++modelIndex) {
+            const QString &model = provider.models.at(modelIndex);
             const QString namespaced = provider.prefix + "/" + model;
-            if (!provider.baseUrl.isEmpty()) anthropicModels.append(namespaced);
-            if (!provider.responsesBaseUrl.isEmpty()) responsesModels.append(namespaced);
+            if (!provider.baseUrl.isEmpty() &&
+                modelSupportsEndpoint(provider, modelIndex, "anthropic"))
+                anthropicModels.append(namespaced);
+            if (!provider.responsesBaseUrl.isEmpty() &&
+                modelSupportsEndpoint(provider, modelIndex, "responses"))
+                responsesModels.append(namespaced);
         }
     }
     anthropicModels.removeDuplicates();

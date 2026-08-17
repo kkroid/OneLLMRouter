@@ -57,7 +57,8 @@ providers:
     base_url: "http://127.0.0.1:9"
     api_key: "test"
     proxy: false
-    models: ["model"]
+    models:
+      - {id: "model", endpoints: [anthropic]}
 `, port, filepath.ToSlash(filepath.Join(dir, "logs")))
 	if err := os.WriteFile(configFile, []byte(configData), 0o600); err != nil {
 		t.Fatal(err)

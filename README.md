@@ -74,7 +74,7 @@ git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter
 pwsh build.ps1
 ```
 
-便携版产物在 `dist/onellm-router-v1.5.0.exe`。
+便携版产物在 `dist/onellm-router-v1.5.1.exe`。
 
 构建桌面安装包还需要 Qt 6.8.3（MSVC 2022 x64）、CMake、MSVC 2022 和 Inno Setup 6：
 
@@ -83,7 +83,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-安装包输出到 `dist/OneLLMRouter-1.5.0-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
+安装包输出到 `dist/OneLLMRouter-1.5.1-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。首次安装后从开始菜单启动；升级运行中的托盘时由 Windows Restart Manager 恢复一次。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
 
 ### 2. 配置
 
@@ -136,11 +136,19 @@ providers:
   - name: "DeepSeek"
     prefix: "ds"
     base_url: "https://api.deepseek.com/anthropic"
+    openai_base_url: "https://api.deepseek.com"
+    responses_base_url: "https://api.deepseek.com"
     api_key: "sk-your-deepseek-key"
     proxy: false           # 国内直连，不走代理
     models:
-      - "deepseek-v4-pro[1m]"
-      - "deepseek-v4-flash[1m]"
+      - id: "deepseek-v4-pro[1m]"
+        endpoints: [anthropic]
+      - id: "deepseek-v4-flash[1m]"
+        endpoints: [anthropic]
+      - id: "deepseek-v4-pro"
+        endpoints: [openai, responses]
+      - id: "deepseek-v4-flash"
+        endpoints: [openai, responses]
 
 model_slots:
   default: "ds/deepseek-v4-pro[1m]"
@@ -153,7 +161,7 @@ model_slots:
 ### 3. 启动
 
 ```bash
-.\dist\onellm-router-v1.5.0.exe
+.\dist\onellm-router-v1.5.1.exe
 ```
 
 启动时会打印 Claude Code 的环境配置。也可以使用桌面 Clients 页面，或使用下面的 `client claude` 命令受控写入。
@@ -269,7 +277,7 @@ onellm-router client codex preview --model c78/gpt-5.6-sol --json
 onellm-router client codex catalog-apply --json
 ```
 
-v1.5.0 不写入、备份或恢复 Codex `config.toml`，也不提供原始 TOML 或 catalog JSON 编辑器。`catalog-apply` 只重新生成 OneLLMRouter catalog；仅当 `codex.overwrite_catalog: true` 时才同步旧的 Codex catalog 路径。
+v1.5.1 不写入、备份或恢复 Codex `config.toml`，也不提供原始 TOML 或 catalog JSON 编辑器。`catalog-apply` 只重新生成 OneLLMRouter catalog；仅当 `codex.overwrite_catalog: true` 时才同步旧的 Codex catalog 路径。
 
 每个 Responses provider 使用 `responses_base_url`，OneLLMRouter 会在请求上游前移除模型 ID 中的 `provider/` 前缀。例如本地选择 `c78/gpt-5.6-sol`，上游收到的模型名是 `gpt-5.6-sol`。
 
@@ -286,13 +294,14 @@ onellm-router version        # 查看版本
 onellm-router stats day      # 查看 UTC 日 Token Usage
 onellm-router stats week     # 查看 ISO 周 Token Usage
 onellm-router stats month    # 查看 UTC 月 Token Usage
+onellm-router stats range START END  # 查看包含起止日期的 UTC 区间 Usage
 ```
 
-`stats` 命令支持可选时间标签和 `--json`，按 Provider、请求模型和上游模型分组，分别展示 input、output、cache read、cache write 和 reasoning token。上游没有返回的字段会标记为未知，不会伪装成零。一次客户端请求共享稳定的 `request_id`，每次上游尝试使用从 1 开始的 `upstream_attempt`，包括失败、重试耗尽、客户端取消和服务关闭。
+`stats day/week/month` 支持可选时间标签，`stats range` 接受 `YYYY-MM-DD` 格式的起止日期并包含两端；所有统计命令都支持 `--json`。结果按 Provider、请求模型和上游模型分组，分别展示 input、output、cache read、cache write 和 reasoning token。上游没有返回的字段会标记为未知，不会伪装成零。一次客户端请求共享稳定的 `request_id`，每次上游尝试使用从 1 开始的 `upstream_attempt`，包括失败、重试耗尽、客户端取消和服务关闭。
 
 ### 桌面配置与 Usage
 
-Qt 桌面提供 Providers、Clients 和 Usage 页面，模型配置与手动发现位于对应 Provider 下。Provider/模型修改会立即进入界面草稿，由 Core 校验并原子写回；旧 API Key 不会显示，保存后托盘会优雅重启其持有的 Core，附着到外部 Core 时保持只读。Clients 页面提供上述 Claude 受控合并/恢复和 Codex 只读状态/预览/catalog 同步；Usage 页面直接读取 Core 的日/周/月统计，不自行聚合 JSONL。v1.5.0 不提供 MCP、Skill、Prompt 管理、Auto Failover、原始客户端文件编辑器或无关偏好编辑器。
+Qt 桌面提供 Providers、Clients 和 Usage 页面，模型配置与手动发现位于对应 Provider 下。Provider/模型修改会立即进入界面草稿，由 Core 校验并原子写回；旧 API Key 不会显示，保存后托盘会优雅重启其持有的 Core，附着到外部 Core 时保持只读。Clients 页面提供上述 Claude 受控合并/恢复和 Codex 只读状态/预览/catalog 同步；Usage 页面提供今天、本月和包含起止日期的自定义区间，并在选择完成后自动读取 Core 统计。v1.5.1 不提供 MCP、Skill、Prompt 管理、Auto Failover、原始客户端文件编辑器或无关偏好编辑器。
 
 ### 平台能力矩阵
 
@@ -306,7 +315,7 @@ Qt 桌面提供 Providers、Clients 和 Usage 页面，模型配置与手动发�
 | 便携版 `--daemon`、`install`、`uninstall` | 支持 | 不支持 | 不支持 |
 | 桌面开机自启与应用重启集成 | 支持 | 不支持 | 不支持 |
 
-发布流水线会在三个系统上编译并测试 Go 和 Qt，但 v1.5.0 只发布 Windows x64 便携版和 Setup 安装包。Linux/macOS 当前是可从源码构建的跨平台基础，不代表完整的原生安装和生命周期体验。
+发布流水线会在三个系统上编译并测试 Go 和 Qt，但 v1.5.1 只发布 Windows x64 便携版和 Setup 安装包。Linux/macOS 当前是可从源码构建的跨平台基础，不代表完整的原生安装和生命周期体验。
 
 ### 内部桌面契约
 
@@ -378,14 +387,26 @@ providers:
   - name: "DeepSeek"
     prefix: "ds"
     base_url: "https://api.deepseek.com/anthropic"
+    openai_base_url: "https://api.deepseek.com"
+    responses_base_url: "https://api.deepseek.com"
     api_key: "sk-your-key"
     proxy: false
-    models: ["deepseek-v4-pro[1m]", "deepseek-v4-flash[1m]"]
+    models:
+      - id: "deepseek-v4-pro[1m]"
+        endpoints: [anthropic]
+      - id: "deepseek-v4-flash[1m]"
+        endpoints: [anthropic]
+      - id: "deepseek-v4-pro"
+        endpoints: [openai, responses]
+      - id: "deepseek-v4-flash"
+        endpoints: [openai, responses]
 ```
 
 `retry` 是全局上游重试策略，默认启用。一次模型请求最多调用上游 15 次，错误恢复预算最多 5 分钟，任意两次尝试间最多等待 30 秒。`status_codes` 严格控制需要重试的 HTTP 状态；默认重试 `408/409/425/429/500/502/503/504`，不包含 `403`。配置者可按上游实际行为增删状态码；显式设置为空列表 `[]` 时不重试任何 HTTP 状态。传输错误、超时和非流式响应体读取错误仍按统一策略重试。Responses 流在尚未产生输出时如果收到 `server_is_overloaded`、`slow_down` 或明确的模型容量错误，会在内部按 `503` 交给同一策略判断；已经产生输出的流不会重放。配置不允许重试或重试耗尽时，客户端收到最后一次上游原始 `200 + SSE` 容量失败，而不是内部分类使用的 503。
 
 每个 provider 可设置 `proxy`：`true` 走代理，`false` 直连，不填则继承全局设置。需要跨境访问的供应商通常走代理，国内服务可按网络情况直连。
+
+`models` 中的每项都必须使用对象形式，并通过 `endpoints` 明确声明适用的 `anthropic`、`openai` 或 `responses` 上游线路；可用 `upstream_model` 指定实际发送给该线路的模型名。配置了模型时以配置为准；未配置时才查询对应线路的上游模型目录。
 
 ### model_slots
 
