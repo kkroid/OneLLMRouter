@@ -6,7 +6,7 @@ import (
 )
 
 func TestHealthPayloadIdentifiesRouter(t *testing.T) {
-	payload := buildHealthPayload("1.4.0", 1234, 3456, 7, `C:\config\router.yaml`, "127.0.0.1:1082")
+	payload := buildHealthPayload("1.4.0", 1234, 3456, 7, `C:\config\router.yaml`, "127.0.0.1:1082", []string{"ds/model"})
 	if payload.Service != "onellm-router" || payload.Status != "ok" {
 		t.Fatalf("identity = %+v", payload)
 	}
@@ -19,10 +19,13 @@ func TestHealthPayloadIdentifiesRouter(t *testing.T) {
 	if payload.Version != "1.4.0" || payload.HTTPPort != 3456 {
 		t.Fatalf("compatibility fields = %+v", payload)
 	}
+	if len(payload.RetryingModels) != 1 || payload.RetryingModels[0] != "ds/model" {
+		t.Fatalf("retrying models = %v", payload.RetryingModels)
+	}
 }
 
 func TestHealthPayloadAlwaysIncludesProxyField(t *testing.T) {
-	data, err := json.Marshal(buildHealthPayload("dev", 1, 2, 3, `C:\config\router.yaml`, ""))
+	data, err := json.Marshal(buildHealthPayload("dev", 1, 2, 3, `C:\config\router.yaml`, "", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +35,7 @@ func TestHealthPayloadAlwaysIncludesProxyField(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, field := range []string{
-		"status", "service", "pid", "version", "http_port", "models", "config_path", "proxy_socks5",
+		"status", "service", "pid", "version", "http_port", "models", "config_path", "proxy_socks5", "retrying_models",
 	} {
 		if _, ok := fields[field]; !ok {
 			t.Fatalf("missing %q in %s", field, data)

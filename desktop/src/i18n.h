@@ -5,6 +5,7 @@
 
 struct Strings {
     QString stopped, starting, healthy, degraded, conflict, error;
+    QString retrying;
     QString modelsPort, proxy, proxyUnknown, proxyDisabled, reachable, unreachable;
     QString start, stop, restart, externallyManaged, gracefulStopTimedOut;
     QString providerConfiguration, openConfig, openLogs, autoStart, quit;
@@ -17,6 +18,7 @@ inline Strings stringsForLocale(const QLocale &locale)
             QString::fromUtf8("已停止"), QString::fromUtf8("正在启动"),
             QString::fromUtf8("健康"), QString::fromUtf8("降级"),
             QString::fromUtf8("端口冲突"), QString::fromUtf8("错误"),
+            QString::fromUtf8("正在重试：%1"),
             QString::fromUtf8("模型：%1 | 端口：%2"),
             QString::fromUtf8("代理：%1 - %2"), QString::fromUtf8("代理：未知"),
             QString::fromUtf8("代理：未配置"),
@@ -31,6 +33,7 @@ inline Strings stringsForLocale(const QLocale &locale)
     }
     return {
         "Stopped", "Starting", "Healthy", "Degraded", "Port conflict", "Error",
+        "Retrying: %1",
         "Models: %1 | Port: %2", "Proxy: %1 - %2", "Proxy: Unknown",
         "Proxy: Not configured",
         "Reachable", "Unreachable",

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 enum class ProcessOwnership {
     None,
@@ -27,6 +28,7 @@ struct RouterHealth {
     int pid = 0;
     int port = 0;
     int models = 0;
+    QStringList retryingModels;
 };
 
 constexpr bool canControlRouter(ProcessOwnership ownership)

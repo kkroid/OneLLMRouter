@@ -110,6 +110,78 @@ func TestRetryExposesStableOneBasedAttemptIdentity(t *testing.T) {
 	}
 }
 
+func TestRetryObserverReportsRetryCycle(t *testing.T) {
+	policy := retryPolicy()
+	policy.MaxAttempts = 2
+	executor, _ := newTestExecutor(policy)
+	var events []RetryEvent
+	executor.SetRetryObserver(func(event RetryEvent) {
+		events = append(events, event)
+	})
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return testResponse(http.StatusBadGateway), nil
+		}
+		return testResponse(http.StatusOK), nil
+	})}
+	metadata := Metadata{RequestedModel: "ds/model"}
+
+	result, failure := executor.Do(context.Background(), client, metadata, Options{Mode: Headers}, func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, "https://example.test/v1/messages", nil)
+	})
+	if failure != nil {
+		t.Fatalf("Do() failure = %+v", failure)
+	}
+	result.Response.Body.Close()
+	if len(events) != 2 || !events[0].Active || events[1].Active || events[0].Metadata.RequestedModel != "ds/model" {
+		t.Fatalf("retry events = %+v", events)
+	}
+}
+
+func TestRetryObserverPanicDoesNotAffectRequest(t *testing.T) {
+	policy := retryPolicy()
+	policy.MaxAttempts = 2
+	executor, _ := newTestExecutor(policy)
+	executor.SetRetryObserver(func(RetryEvent) { panic("observer failure") })
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return testResponse(http.StatusBadGateway), nil
+		}
+		return testResponse(http.StatusOK), nil
+	})}
+
+	result, failure := executor.Do(context.Background(), client, Metadata{}, Options{Mode: Headers}, func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, "https://example.test/v1/messages", nil)
+	})
+	if failure != nil || result == nil {
+		t.Fatalf("observer changed request outcome: result=%+v failure=%+v", result, failure)
+	}
+	result.Response.Body.Close()
+}
+
+func TestRetryObserverIgnoresNonRetryableFailure(t *testing.T) {
+	executor, _ := newTestExecutor(retryPolicy())
+	var events []RetryEvent
+	executor.SetRetryObserver(func(event RetryEvent) { events = append(events, event) })
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return testResponse(http.StatusForbidden), nil
+	})}
+
+	_, failure := executor.Do(context.Background(), client, Metadata{}, Options{Mode: Headers}, func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, "https://example.test/v1/messages", nil)
+	})
+	if failure == nil || failure.RetryEligible {
+		t.Fatalf("failure = %+v, want non-retryable failure", failure)
+	}
+	if len(events) != 0 {
+		t.Fatalf("non-retryable failure emitted events: %+v", events)
+	}
+}
+
 func TestAttemptObserverOwnsFailedAndBufferedAttemptsOnly(t *testing.T) {
 	t.Run("failed and buffered success", func(t *testing.T) {
 		policy := retryPolicy()

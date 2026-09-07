@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -25,6 +26,15 @@ bool isIntegerInRange(const QJsonValue &value, int minimum, int maximum)
 bool isString(const QJsonObject &object, const QString &key)
 {
     return object.contains(key) && object.value(key).isString();
+}
+
+bool isStringArray(const QJsonValue &value)
+{
+    if (!value.isArray()) return false;
+    for (const QJsonValue &item : value.toArray()) {
+        if (!item.isString() || item.toString().trimmed().isEmpty()) return false;
+    }
+    return true;
 }
 
 bool isLoopbackHost(const QString &host)
@@ -121,7 +131,9 @@ RouterHealth parseRouterHealth(const QByteArray &payload)
         !isString(object, "config_path") ||
         object.value("config_path").toString().trimmed().isEmpty() ||
         (object.contains("proxy_socks5") &&
-         !object.value("proxy_socks5").isString())) {
+         !object.value("proxy_socks5").isString()) ||
+        (object.contains("retrying_models") &&
+         !isStringArray(object.value("retrying_models")))) {
         return {};
     }
 
@@ -135,6 +147,9 @@ RouterHealth parseRouterHealth(const QByteArray &payload)
     result.models = object.value("models").toInt();
     result.configPath = object.value("config_path").toString();
     result.proxySocks5 = object.value("proxy_socks5").toString();
+    for (const QJsonValue &model : object.value("retrying_models").toArray()) {
+        result.retryingModels.append(model.toString());
+    }
     return result;
 }
 

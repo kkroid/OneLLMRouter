@@ -167,17 +167,17 @@ func TestResolverUsesEndpointSpecificModelRoute(t *testing.T) {
 	}
 }
 
-func TestResolverMapsClientModelToEndpointUpstreamModel(t *testing.T) {
+func TestResolverMapsSafeAnthropicAliasToOneMUpstreamModel(t *testing.T) {
 	r := NewResolver([]Provider{{
-		Prefix: "ds", ResponsesBaseURL: "http://unused",
+		Prefix: "ds", BaseURL: "http://unused",
 		ModelRoutes: []ModelRoute{{
-			ID: "deepseek-v4-pro[1m]", Endpoints: []EndpointType{EndpointResponses}, UpstreamModel: "deepseek-v4-pro",
+			ID: "deepseek-v4-pro-1m", Endpoints: []EndpointType{EndpointAnthropic}, UpstreamModel: "deepseek-v4-pro[1m]",
 		}},
 	}})
 
-	result := r.ResolveForEndpoint("ds/deepseek-v4-pro[1m]", EndpointResponses)
-	if result == nil || result.Model != "deepseek-v4-pro" {
-		t.Fatalf("responses route = %+v", result)
+	result := r.ResolveForEndpoint("ds/deepseek-v4-pro-1m", EndpointAnthropic)
+	if result == nil || result.Model != "deepseek-v4-pro[1m]" {
+		t.Fatalf("anthropic route = %+v", result)
 	}
 }
 

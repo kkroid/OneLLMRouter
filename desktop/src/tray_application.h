@@ -34,6 +34,10 @@ bool migrateLegacyAutoStart(QSettings &settings, const QString &command);
 QString trayToolTipText(RouterState state, const QString &stateText,
                         const QString &coreVersion,
                         const QString &fallbackVersion);
+QString trayStatusText(RouterState state, const QString &stateText,
+                       const QString &retryingFormat,
+                       const QStringList &retryingModels);
+QString trayIconResource(RouterState state, bool retrying);
 
 class NotificationLimiter {
 public:
@@ -63,6 +67,7 @@ private:
     void setState(RouterState state, const QString &detail = {});
     void updateTrayPresentation();
     QString stateText() const;
+    QString presentationStateText() const;
     void setAutoStartEnabled(bool enabled);
     bool autoStartEnabled() const;
 

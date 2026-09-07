@@ -4,7 +4,7 @@ param(
     [switch]$TestOnly,
     [switch]$Desktop,
     [switch]$Installer,
-    [string]$Version = "1.5.1",
+    [string]$Version = "1.5.2",
     [string]$QtRoot = $env:QT_ROOT,
     [string]$StageDirectory = "",
     [string]$CMake = "cmake",

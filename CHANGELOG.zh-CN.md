@@ -4,6 +4,22 @@
 
 ## [未发布]
 
+## [1.5.2] - 2026-08-20
+
+### 新增
+
+- 新增托盘重试反馈：上游重试时显示黄色图标和正在重试的客户端模型，并支持并发重试展示。
+
+### 修复
+
+- 为 Anthropic 客户端增加不含方括号的安全别名，例如 `deepseek-v4-flash-1m`，通过 `upstream_model` 映射到包含 `[1m]` 的上游模型名，避免 Claude Code 在请求前剥离后缀。
+
+### 变更
+
+- `/health` 新增当前重试模型字段，不改变原有 Retry 策略。
+
+## [1.5.1] - 2026-08-17
+
 ### 新增
 
 - 新增按端点声明 Provider 模型，端点归属必须明确，并支持可选的上游模型名。
@@ -72,6 +88,8 @@
 - 修复托盘子进程退出、重启取消、启动失败、端口冲突、旧开机自启迁移和运行中安装升级。
 - 修复重试取消和超时边界，客户端断开或服务关闭时会及时停止待处理工作，且不会生成误导性的上游错误。
 
+[1.5.2]: https://github.com/kkroid/OneLLMRouter/compare/v1.5.1...v1.5.2
+[1.5.1]: https://github.com/kkroid/OneLLMRouter/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/kkroid/OneLLMRouter/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/kkroid/OneLLMRouter/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/kkroid/OneLLMRouter/compare/v1.3.2...v1.4.0

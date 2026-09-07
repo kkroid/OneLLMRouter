@@ -152,6 +152,8 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("create direct client: %w", err)
 			}
 			retryExecutor := upstream.NewExecutor(cfg.Retry, logger)
+			retryActivity := newRetryActivityTracker()
+			retryExecutor.SetRetryObserver(retryActivity.Observe)
 			proxyHandler := proxy.NewHandler(resolver, httpClient, directClient, logger, retryExecutor)
 			proxyHandler.Usage = usage.NewCollector(usage.NewStore("", logger))
 			proxyHandler.Catalog.SetReasoningMappings(codexReasoningMappings(cfg.Codex.Models))
@@ -184,7 +186,7 @@ func serveCmd() *cobra.Command {
 			}
 
 			mux := http.NewServeMux()
-			registerRoutes(mux, resolver, proxyHandler, cfg, selectedConfigPath, logger)
+			registerRoutes(mux, resolver, proxyHandler, cfg, selectedConfigPath, logger, retryActivity)
 
 			serviceContext, cancelService := context.WithCancelCause(context.Background())
 			defer cancelService(nil)
@@ -291,7 +293,7 @@ func statusCmd() *cobra.Command {
 	}
 }
 
-func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler *proxy.Handler, cfg *config.Config, configPath string, logger *slog.Logger) {
+func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler *proxy.Handler, cfg *config.Config, configPath string, logger *slog.Logger, retryActivity *retryActivityTracker) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			w.WriteHeader(http.StatusNotFound)
@@ -309,6 +311,7 @@ func registerRoutes(mux *http.ServeMux, resolver *router.Resolver, proxyHandler 
 			len(resolver.AllModelIDs()),
 			configPath,
 			cfg.Proxy.Socks5,
+			retryActivity.Models(),
 		)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(health)

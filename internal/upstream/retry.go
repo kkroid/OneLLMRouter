@@ -62,11 +62,20 @@ type AttemptObservation struct {
 type AttemptObserver func(AttemptObservation)
 
 type Metadata struct {
-	RequestID string
-	Provider  string
-	Model     string
-	Endpoint  string
+	RequestID      string
+	Provider       string
+	Model          string
+	RequestedModel string
+	Endpoint       string
 }
+
+// RetryEvent reports when a request enters or leaves its retry cycle.
+type RetryEvent struct {
+	Metadata Metadata
+	Active   bool
+}
+
+type RetryObserver func(RetryEvent)
 
 type Options struct {
 	Mode              Mode
@@ -114,11 +123,12 @@ type Failure struct {
 }
 
 type Executor struct {
-	policy config.RetryConfig
-	logger *slog.Logger
-	now    func() time.Time
-	wait   func(context.Context, time.Duration) error
-	jitter func() float64
+	policy        config.RetryConfig
+	logger        *slog.Logger
+	retryObserver RetryObserver
+	now           func() time.Time
+	wait          func(context.Context, time.Duration) error
+	jitter        func() float64
 }
 
 var (
@@ -141,6 +151,10 @@ func NewExecutor(policy config.RetryConfig, loggers ...*slog.Logger) *Executor {
 	return executor
 }
 
+func (e *Executor) SetRetryObserver(observer RetryObserver) {
+	e.retryObserver = observer
+}
+
 func (e *Executor) Do(
 	ctx context.Context,
 	client *http.Client,
@@ -156,7 +170,11 @@ func (e *Executor) Do(
 	inferenceClient := inferenceClient(client)
 	var lastFailure *Failure
 	var observations []AttemptObservation
+	retrying := false
 	defer func() {
+		if retrying {
+			e.notifyRetry(RetryEvent{Metadata: metadata, Active: false})
+		}
 		notifyAttemptObserver(options.AttemptObserver, observations)
 	}()
 
@@ -302,6 +320,10 @@ func (e *Executor) Do(
 			e.logAttemptFailure(metadata, maxAttempts, lastFailure, 0, options.Sanitizer)
 			return e.completeFailure(ctx, metadata, maxAttempts, options.Sanitizer, lastFailure)
 		}
+		if !retrying {
+			e.notifyRetry(RetryEvent{Metadata: metadata, Active: true})
+			retrying = true
+		}
 		e.logAttemptFailure(metadata, maxAttempts, lastFailure, delay, options.Sanitizer)
 		if err := e.wait(ctx, delay); err != nil {
 			cause := context.Cause(ctx)
@@ -316,6 +338,16 @@ func (e *Executor) Do(
 	}
 
 	panic("unreachable")
+}
+
+func (e *Executor) notifyRetry(event RetryEvent) {
+	if e.retryObserver == nil {
+		return
+	}
+	defer func() {
+		_ = recover()
+	}()
+	e.retryObserver(event)
 }
 
 func appendAttemptObservation(observations []AttemptObservation, requestID string, attempt, statusCode int, body []byte, bodyComplete bool, failureKind FailureKind) []AttemptObservation {

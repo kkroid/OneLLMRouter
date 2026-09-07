@@ -87,7 +87,8 @@ void RouterDiscoveryTest::parsesExpectedRouterHealth()
     const auto health = parseRouterHealth(R"({
         "status":"ok","service":"onellm-router","pid":42,"version":"1.4.0",
         "http_port":45678,"models":2,"config_path":"C:/tmp/router.yaml",
-        "proxy_socks5":"127.0.0.1:1082"
+        "proxy_socks5":"127.0.0.1:1082",
+        "retrying_models":["ds/deepseek-v4-flash-1m"]
     })");
 
     QVERIFY(health.valid);
@@ -95,6 +96,8 @@ void RouterDiscoveryTest::parsesExpectedRouterHealth()
     QCOMPARE(health.pid, 42);
     QCOMPARE(health.configPath, QString("C:/tmp/router.yaml"));
     QCOMPARE(health.proxySocks5, QString("127.0.0.1:1082"));
+    QCOMPARE(health.retryingModels,
+             QStringList{"ds/deepseek-v4-flash-1m"});
 }
 
 void RouterDiscoveryTest::matchesHealthToSelectedConfig()
@@ -130,6 +133,11 @@ void RouterDiscoveryTest::rejectsWrongHealthIdentity()
     QVERIFY(!parseRouterHealth(R"({
         "status":"ok","service":"onellm-router","pid":42,"version":"1.4.0",
         "http_port":45678,"models":2,"config_path":""
+    })").valid);
+    QVERIFY(!parseRouterHealth(R"({
+        "status":"ok","service":"onellm-router","pid":42,"version":"1.4.0",
+        "http_port":45678,"models":2,"config_path":"C:/tmp/router.yaml",
+        "retrying_models":[42]
     })").valid);
 }
 

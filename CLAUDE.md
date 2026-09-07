@@ -24,7 +24,7 @@ desktop/            Qt tray, process ownership, discovery, tests
 installer/          Windows installer and upgrade contracts
 ```
 
-For v1.5.1 work, start with [the version plan](docs/superpowers/specs/2026-08-14-v1.5.1-plan.md), then
+For v1.5.2 work, start with [the version plan](docs/superpowers/specs/2026-08-20-v1.5.2-plan.md), then
 read the package tests before choosing an implementation boundary.
 
 ## Claude Code Commands

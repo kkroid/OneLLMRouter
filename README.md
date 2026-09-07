@@ -58,10 +58,12 @@ Anthropic Messages   Chat Completions             Responses
 
 | 前缀 | 模型 ID | 说明 |
 |------|--------|------|
-| `ds/` | `deepseek-v4-pro[1m]` | DeepSeek（示例） |
-| `ds/` | `deepseek-v4-flash[1m]` | DeepSeek（示例） |
+| `ds/` | `deepseek-v4-pro-1m` | DeepSeek Anthropic（上游 `deepseek-v4-pro[1m]`） |
+| `ds/` | `deepseek-v4-flash-1m` | DeepSeek Anthropic（上游 `deepseek-v4-flash[1m]`） |
 
 > 添加新 provider：在 yaml 的 `providers:` 下添加新条目，重启生效。
+
+Anthropic 客户端模型 ID 使用不含方括号的别名（例如 `deepseek-v4-flash-1m`），避免 Claude Code 在请求前标准化掉 `[1m]`；`upstream_model` 保留并发送上游要求的完整模型名。
 
 ## 快速开始
 
@@ -74,7 +76,7 @@ git clone https://github.com/kkroid/OneLLMRouter.git && cd OneLLMRouter
 pwsh build.ps1
 ```
 
-便携版产物在 `dist/onellm-router-v1.5.1.exe`。
+便携版产物在 `dist/onellm-router-v1.5.2.exe`。
 
 构建桌面安装包还需要 Qt 6.8.3（MSVC 2022 x64）、CMake、MSVC 2022 和 Inno Setup 6：
 
@@ -83,7 +85,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-安装包输出到 `dist/OneLLMRouter-1.5.1-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。首次安装后从开始菜单启动；升级运行中的托盘时由 Windows Restart Manager 恢复一次。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；便携版仍保持单个 Go 可执行文件。
+安装包输出到 `dist/OneLLMRouter-1.5.2-setup.exe`。安装程序按用户安装到 `%LOCALAPPDATA%\Programs\OneLLMRouter`，不会覆盖已有的 `%USERPROFILE%\.onellm\onellm-router.yaml`。首次安装后从开始菜单启动；升级运行中的托盘时由 Windows Restart Manager 恢复一次。桌面版提供中英文系统托盘、开机自启、状态检查和安全升级；发生上游重试时，托盘图标临时变为黄色并显示正在重试的模型。便携版仍保持单个 Go 可执行文件。
 
 ### 2. 配置
 
@@ -141,27 +143,29 @@ providers:
     api_key: "sk-your-deepseek-key"
     proxy: false           # 国内直连，不走代理
     models:
-      - id: "deepseek-v4-pro[1m]"
+      - id: "deepseek-v4-pro-1m"
         endpoints: [anthropic]
-      - id: "deepseek-v4-flash[1m]"
+        upstream_model: "deepseek-v4-pro[1m]"
+      - id: "deepseek-v4-flash-1m"
         endpoints: [anthropic]
+        upstream_model: "deepseek-v4-flash[1m]"
       - id: "deepseek-v4-pro"
         endpoints: [openai, responses]
       - id: "deepseek-v4-flash"
         endpoints: [openai, responses]
 
 model_slots:
-  default: "ds/deepseek-v4-pro[1m]"
-  opus: "ds/deepseek-v4-pro[1m]"
-  sonnet: "ds/deepseek-v4-pro[1m]"
-  haiku: "ds/deepseek-v4-flash[1m]"
-  fable: "ds/deepseek-v4-flash[1m]"
+  default: "ds/deepseek-v4-pro-1m"
+  opus: "ds/deepseek-v4-pro-1m"
+  sonnet: "ds/deepseek-v4-pro-1m"
+  haiku: "ds/deepseek-v4-flash-1m"
+  fable: "ds/deepseek-v4-flash-1m"
 ```
 
 ### 3. 启动
 
 ```bash
-.\dist\onellm-router-v1.5.1.exe
+.\dist\onellm-router-v1.5.2.exe
 ```
 
 启动时会打印 Claude Code 的环境配置。也可以使用桌面 Clients 页面，或使用下面的 `client claude` 命令受控写入。
@@ -183,24 +187,24 @@ curl http://localhost:3456/openai/v1/models
 # 非流式推理
 curl -X POST http://localhost:3456/anthropic/v1/messages \
   -H "Content-Type: application/json" \
-  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"ds/deepseek-v4-pro-1m","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
 
 # 流式推理
 curl -N -X POST http://localhost:3456/anthropic/v1/messages \
   -H "Content-Type: application/json" \
-  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
+  -d '{"model":"ds/deepseek-v4-pro-1m","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
 
 # --- OpenAI 格式 ---
 
 # 非流式推理
 curl -X POST http://localhost:3456/openai/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"ds/deepseek-v4-pro","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
 
 # 流式推理
 curl -N -X POST http://localhost:3456/openai/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"ds/deepseek-v4-pro[1m]","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
+  -d '{"model":"ds/deepseek-v4-pro","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hello"}]}'
 
 # --- OpenAI Responses / Codex 格式 ---
 # 将模型名替换为已配置的 Responses provider/model
@@ -219,11 +223,11 @@ curl -N -X POST http://localhost:3456/openai/v1/responses \
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:3456/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "x",
-    "ANTHROPIC_MODEL": "ds/deepseek-v4-pro[1m]",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "ds/deepseek-v4-pro[1m]",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "ds/deepseek-v4-pro[1m]",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "ds/deepseek-v4-flash[1m]",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL": "ds/deepseek-v4-flash[1m]"
+    "ANTHROPIC_MODEL": "ds/deepseek-v4-pro-1m",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "ds/deepseek-v4-pro-1m",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "ds/deepseek-v4-pro-1m",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "ds/deepseek-v4-flash-1m",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "ds/deepseek-v4-flash-1m"
   }
 }
 ```
@@ -247,7 +251,7 @@ onellm-router client claude restore --json
   "provider": "openai",
   "apiKey": "x",
   "baseUrl": "http://localhost:3456/openai",
-  "model": "ds/deepseek-v4-pro[1m]"
+  "model": "ds/deepseek-v4-pro-1m"
 }
 ```
 
@@ -392,10 +396,12 @@ providers:
     api_key: "sk-your-key"
     proxy: false
     models:
-      - id: "deepseek-v4-pro[1m]"
+      - id: "deepseek-v4-pro-1m"
         endpoints: [anthropic]
-      - id: "deepseek-v4-flash[1m]"
+        upstream_model: "deepseek-v4-pro[1m]"
+      - id: "deepseek-v4-flash-1m"
         endpoints: [anthropic]
+        upstream_model: "deepseek-v4-flash[1m]"
       - id: "deepseek-v4-pro"
         endpoints: [openai, responses]
       - id: "deepseek-v4-flash"
@@ -412,11 +418,11 @@ providers:
 
 ```yaml
 model_slots:
-  default: "ds/deepseek-v4-pro[1m]"
-  opus: "ds/deepseek-v4-pro[1m]"
-  sonnet: "ds/deepseek-v4-pro[1m]"
-  haiku: "ds/deepseek-v4-flash[1m]"
-  fable: "ds/deepseek-v4-flash[1m]"
+  default: "ds/deepseek-v4-pro-1m"
+  opus: "ds/deepseek-v4-pro-1m"
+  sonnet: "ds/deepseek-v4-pro-1m"
+  haiku: "ds/deepseek-v4-flash-1m"
+  fable: "ds/deepseek-v4-flash-1m"
 ```
 
 ## 日志
@@ -424,7 +430,7 @@ model_slots:
 JSON 格式，按天滚动，保留 30 天，文件路径 `~/.onellm/logs/onellm-router-2026-06-12.log`：
 
 ```json
-{"time":"2026-07-31T10:30:00+08:00","level":"INFO","msg":"request","request_id":"a1b2c3d4","method":"POST","path":"/anthropic/v1/messages","status":200,"duration_ms":1234,"model":"ds/deepseek-v4-pro[1m]","provider":"ds","stream":true,"ttfb_ms":650,"upstream_attempts":3,"retry_elapsed_ms":1012,"last_upstream_status":502,"last_failure_kind":"http"}
+{"time":"2026-07-31T10:30:00+08:00","level":"INFO","msg":"request","request_id":"a1b2c3d4","method":"POST","path":"/anthropic/v1/messages","status":200,"duration_ms":1234,"model":"ds/deepseek-v4-pro-1m","provider":"ds","stream":true,"ttfb_ms":650,"upstream_attempts":3,"retry_elapsed_ms":1012,"last_upstream_status":502,"last_failure_kind":"http"}
 ```
 
 每次上游失败、重试后恢复、最终失败和请求取消都会使用同一个 `request_id` 写入结构化日志。符合当前重试配置但达到次数或时间上限时记录 `upstream retry exhausted`；不符合重试配置时记录 `upstream retry skipped`。日志中的错误摘要会限制长度并屏蔽 API key、Authorization 和 Bearer credential。原生协议直通路由会向客户端返回最后一次完整的上游失败响应；传输失败、过大的错误体和协议翻译仍返回 OneLLMRouter 生成的错误。

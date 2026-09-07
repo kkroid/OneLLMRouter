@@ -100,6 +100,25 @@ QString trayToolTipText(RouterState state, const QString &stateText,
     return text + QString::fromUtf8(" · ") + version;
 }
 
+QString trayStatusText(RouterState state, const QString &stateText,
+                       const QString &retryingFormat,
+                       const QStringList &retryingModels)
+{
+    if (state != RouterState::Healthy || retryingModels.isEmpty()) {
+        return stateText;
+    }
+    return retryingFormat.arg(retryingModels.join(", "));
+}
+
+QString trayIconResource(RouterState state, bool retrying)
+{
+    if (state == RouterState::Healthy && !retrying) return ":/icons/green.ico";
+    if (retrying || state == RouterState::Starting || state == RouterState::Degraded) {
+        return ":/icons/yellow.ico";
+    }
+    return ":/icons/red.ico";
+}
+
 bool NotificationLimiter::shouldNotify(const QString &key, const QDateTime &now)
 {
     const auto previous = m_lastShown.constFind(key);
@@ -207,7 +226,7 @@ void TrayApplication::rebuildMenu()
     disabled(QString("OneLLMRouter %1 - %2")
                  .arg(m_health.version.isEmpty() ? QString(ONELLM_VERSION)
                                                  : m_health.version,
-                      stateText()));
+                      presentationStateText()));
     disabled(m_strings.modelsPort.arg(m_health.models)
                  .arg(m_config.port ? m_config.port : m_health.port));
     if (!m_config.valid) {
@@ -313,12 +332,11 @@ void TrayApplication::setState(RouterState state, const QString &detail)
 
 void TrayApplication::updateTrayPresentation()
 {
-    const QString icon = m_state == RouterState::Healthy ? ":/icons/green.ico"
-        : (m_state == RouterState::Starting || m_state == RouterState::Degraded)
-              ? ":/icons/yellow.ico" : ":/icons/red.ico";
+    const QString icon = trayIconResource(
+        m_state, m_state == RouterState::Healthy && !m_health.retryingModels.isEmpty());
     m_trayIcon.setIcon(QIcon(icon));
     m_trayIcon.setToolTip(trayToolTipText(
-        m_state, stateText(), m_health.version, QString(ONELLM_VERSION)));
+        m_state, presentationStateText(), m_health.version, QString(ONELLM_VERSION)));
 }
 
 QString TrayApplication::stateText() const
@@ -332,6 +350,12 @@ QString TrayApplication::stateText() const
     case RouterState::Error: return m_strings.error;
     }
     return m_strings.error;
+}
+
+QString TrayApplication::presentationStateText() const
+{
+    return trayStatusText(m_state, stateText(), m_strings.retrying,
+                          m_health.retryingModels);
 }
 
 void TrayApplication::setAutoStartEnabled(bool enabled)

@@ -21,6 +21,7 @@ private slots:
     void explicitStopSuppressesAutoStartWhenStopRequestFails();
     void ownedHealthMustMatchChildPid();
     void formatsTrayTooltipVersion();
+    void formatsRetryPresentation();
     void selectsEnglishAndChineseStrings();
     void distinguishesUnknownAndDisabledProxy();
     void rateLimitsIdenticalNotifications();
@@ -144,6 +145,21 @@ void TrayApplicationTest::formatsTrayTooltipVersion()
              QString("OneLLMRouter - Stopped"));
 }
 
+void TrayApplicationTest::formatsRetryPresentation()
+{
+    const QString status = trayStatusText(
+        RouterState::Healthy, "Healthy", "Retrying: %1",
+        {"ds/flash", "ds/pro"});
+    QCOMPARE(status, QString("Retrying: ds/flash, ds/pro"));
+    QCOMPARE(trayToolTipText(RouterState::Healthy, status, "1.5.1", {}),
+             QString::fromUtf8(
+                 "OneLLMRouter - Retrying: ds/flash, ds/pro · v1.5.1"));
+    QCOMPARE(trayIconResource(RouterState::Healthy, true),
+             QString(":/icons/yellow.ico"));
+    QCOMPARE(trayIconResource(RouterState::Healthy, false),
+             QString(":/icons/green.ico"));
+}
+
 void TrayApplicationTest::selectsEnglishAndChineseStrings()
 {
     const Strings english = stringsForLocale(QLocale(QLocale::English));
@@ -154,6 +170,7 @@ void TrayApplicationTest::selectsEnglishAndChineseStrings()
              QString("Graceful stop timed out"));
     QCOMPARE(english.providerConfiguration,
              QString("Provider Configuration"));
+    QCOMPARE(english.retrying, QString("Retrying: %1"));
 
     const Strings chinese = stringsForLocale(QLocale(QLocale::Chinese));
     QCOMPARE(chinese.quit, QString::fromUtf8("退出"));
@@ -163,6 +180,7 @@ void TrayApplicationTest::selectsEnglishAndChineseStrings()
              QString::fromUtf8("优雅停止超时"));
     QCOMPARE(chinese.providerConfiguration,
              QString::fromUtf8("Provider 配置"));
+    QCOMPARE(chinese.retrying, QString::fromUtf8("正在重试：%1"));
 }
 
 void TrayApplicationTest::distinguishesUnknownAndDisabledProxy()

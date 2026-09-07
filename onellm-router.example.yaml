@@ -56,10 +56,12 @@ providers:
     api_key: "sk-your-deepseek-key"
     proxy: false           # 国内直连，不走代理
     models:
-      - id: "deepseek-v4-pro[1m]"
+      - id: "deepseek-v4-pro-1m"
         endpoints: [anthropic]
-      - id: "deepseek-v4-flash[1m]"
+        upstream_model: "deepseek-v4-pro[1m]"
+      - id: "deepseek-v4-flash-1m"
         endpoints: [anthropic]
+        upstream_model: "deepseek-v4-flash[1m]"
       - id: "deepseek-v4-pro"
         endpoints: [openai, responses]
       - id: "deepseek-v4-flash"
@@ -100,8 +102,8 @@ providers:
 # Claude Code 模型槽位 — 每个槽位指定 provider_prefix/model
 # 可在桌面端 Clients 页面通过 Core 受控写入 Claude Code settings.json
 model_slots:
-  default: "ds/deepseek-v4-pro[1m]"
-  opus: "ds/deepseek-v4-pro[1m]"
-  sonnet: "ds/deepseek-v4-pro[1m]"
-  haiku: "ds/deepseek-v4-flash[1m]"
-  fable: "ds/deepseek-v4-flash[1m]"
+  default: "ds/deepseek-v4-pro-1m"
+  opus: "ds/deepseek-v4-pro-1m"
+  sonnet: "ds/deepseek-v4-pro-1m"
+  haiku: "ds/deepseek-v4-flash-1m"
+  fable: "ds/deepseek-v4-flash-1m"

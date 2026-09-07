@@ -61,7 +61,7 @@ Set-Location OneLLMRouter
 pwsh .\build.ps1
 ```
 
-The result is `dist/onellm-router-v1.5.1.exe`.
+The result is `dist/onellm-router-v1.5.2.exe`.
 
 Building the desktop Setup package also requires Qt 6.8.3 for MSVC 2022 x64, CMake, MSVC 2022, and Inno Setup 6:
 
@@ -70,7 +70,7 @@ $env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
 pwsh .\build.ps1 -Installer
 ```
 
-The installer is written to `dist/OneLLMRouter-1.5.1-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`. Start it from the Start menu after a first installation; upgrades restore an already-running tray once through Windows Restart Manager.
+The installer is written to `dist/OneLLMRouter-1.5.2-setup.exe`. It installs per-user under `%LOCALAPPDATA%\Programs\OneLLMRouter` and never overwrites an existing `%USERPROFILE%\.onellm\onellm-router.yaml`. Start it from the Start menu after a first installation; upgrades restore an already-running tray once through Windows Restart Manager.
 
 ## Configuration
 
@@ -121,17 +121,18 @@ providers:
     api_key: "sk-your-key"
     proxy: true
     models:
-      - id: "claude-model[1m]"
+      - id: "claude-model-1m"
         endpoints: [anthropic]
+        upstream_model: "claude-model[1m]"
       - id: "responses-model"
         endpoints: [openai, responses]
 
 model_slots:
-  default: "example/claude-model[1m]"
-  opus: "example/claude-model[1m]"
-  sonnet: "example/claude-model[1m]"
-  haiku: "example/claude-model[1m]"
-  fable: "example/claude-model[1m]"
+  default: "example/claude-model-1m"
+  opus: "example/claude-model-1m"
+  sonnet: "example/claude-model-1m"
+  haiku: "example/claude-model-1m"
+  fable: "example/claude-model-1m"
 ```
 
 Each provider can expose one or more protocol-specific base URLs:
@@ -144,10 +145,12 @@ Set `proxy: true` or `false` on a provider to override the global SOCKS5 setting
 
 Every `models` entry must use object form and explicitly declare its `anthropic`, `openai`, or `responses` upstream routes with `endpoints`. Use `upstream_model` when the exact upstream name differs from the client-visible ID. Configured provider models take precedence over upstream discovery. When `models` is omitted, OneLLMRouter queries that provider's protocol-specific model endpoint.
 
+For Anthropic clients, use a client-visible model ID without square brackets (for example, `claude-model-1m`) when the upstream name contains `[1m]`; Claude Code normalizes that suffix before sending the request. Set `upstream_model` to preserve the exact upstream model name.
+
 ## Run
 
 ```powershell
-.\dist\onellm-router-v1.5.1.exe
+.\dist\onellm-router-v1.5.2.exe
 ```
 
 The service prints the Claude Code environment block at startup. The desktop Clients page or the `client claude` commands can apply it through a controlled merge. The main CLI commands are:
@@ -237,7 +240,7 @@ Providers may charge for failed or ambiguous attempts. OneLLMRouter cannot guara
 
 The Qt desktop provides Providers, Clients, and Usage pages, with model configuration and manual discovery scoped to each Provider. Provider/model edits immediately update the UI draft and use Core validation plus atomic configuration updates; existing API keys are never displayed, and a successful save gracefully restarts the Core owned by the tray. An externally managed Core remains read-only. Clients provides the controlled Claude merge/restore and read-only Codex status/preview/catalog sync described above. Usage automatically reads Core statistics for Today, This month, or an inclusive custom date range. v1.5.1 has no MCP/Skill/Prompt management, Auto Failover, raw client-file editor, or unrelated preference editor. The tray also displays router health, version, model count, configured port, and local SOCKS5 reachability. It chooses English or Simplified Chinese from the system locale.
 
-The tray controls only a core process that it started itself. A matching externally started router is attached read-only, while an unrelated listener is reported as a port conflict. Stop and restart are graceful; the application does not enumerate or terminate processes by image name.
+The tray controls only a core process that it started itself. A matching externally started router is attached read-only, while an unrelated listener is reported as a port conflict. While an upstream retry is active, the tray icon turns yellow and its status identifies the retrying model. Stop and restart are graceful; the application does not enumerate or terminate processes by image name.
 
 Setup upgrades preserve configuration, API keys, logs, and generated catalogs. Windows Restart Manager closes and restarts a running tray while binaries are replaced. The optional start-on-login task registers only the tray, which then owns its core child.
 

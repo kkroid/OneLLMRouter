@@ -4,6 +4,22 @@ All notable user-facing changes to OneLLMRouter are documented here.
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-08-20
+
+### Added
+
+- Added yellow tray retry feedback with the retrying client model name, including concurrent retry display.
+
+### Fixed
+
+- Added safe Anthropic client aliases such as `deepseek-v4-flash-1m` that map through `upstream_model` to upstream names containing `[1m]`, which Claude Code strips before sending requests.
+
+### Changed
+
+- Exposed active retry models through the non-secret `/health` contract without changing retry policy behavior.
+
+## [1.5.1] - 2026-08-17
+
 ### Added
 
 - Added endpoint-scoped Provider model declarations with required endpoint assignments and optional upstream model names.
@@ -72,6 +88,8 @@ All notable user-facing changes to OneLLMRouter are documented here.
 - Fixed tray-child shutdown, restart cancellation, startup failure handling, port conflicts, legacy autostart migration, and running-installer upgrades.
 - Fixed retry cancellation and timeout boundaries so client disconnects and service shutdown stop pending work without producing misleading upstream errors.
 
+[1.5.2]: https://github.com/kkroid/OneLLMRouter/compare/v1.5.1...v1.5.2
+[1.5.1]: https://github.com/kkroid/OneLLMRouter/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/kkroid/OneLLMRouter/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/kkroid/OneLLMRouter/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/kkroid/OneLLMRouter/compare/v1.3.2...v1.4.0
