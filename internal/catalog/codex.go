@@ -53,6 +53,11 @@ func MarshalCodex(models []Model) ([]byte, error) {
 			setCodexField(model, "description", nil)
 			setCodexField(model, "model_messages", nil)
 			setCodexField(model, "base_instructions", customModelBaseInstructions)
+			// DeepSeek accepts standard tools, but not Lite declarations or custom code-mode exec.
+			if strings.HasPrefix(baseModel, "deepseek-") {
+				setCodexField(model, "use_responses_lite", false)
+				setCodexField(model, "tool_mode", nil)
+			}
 		}
 		if len(entry.CodexMetadata) > 0 {
 			upstream, err := decodeCodexModel(entry.CodexMetadata)

@@ -273,6 +273,8 @@ requires_openai_auth = true
 
 启动 OneLLMRouter 后会始终生成 `~/.onellm/model-catalog.json`。默认配置 `codex.overwrite_catalog: true` 还会覆盖 `~/.codex/model-catalog.json`，Codex 的 `/model` 因而可以列出 `provider/model` 形式的模型。设置为 `false` 时只更新 OneLLMRouter 自己的目录文件。
 
+`deepseek-` 模型的 Codex 目录默认禁用 Responses Lite 和 code mode，使用标准工具调用，并保留 freeform `apply_patch`，避免工具调用退化为普通文本。此默认值不依赖 Provider 前缀；上游明确提供的 Codex 能力元数据仍优先。
+
 桌面 Clients 页面和 Core 命令会只读解析 `~/.codex/config.toml`，展示配置/catalog 路径、有效模型和 Provider、同步状态、模型数及显示用来源标识 `OneLLMRouter`，并提供可复制预览和受控 catalog 同步：
 
 ```bash

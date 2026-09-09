@@ -86,6 +86,61 @@ func TestMarshalCodexUsesReasoningPresetObjects(t *testing.T) {
 	}
 }
 
+func TestMarshalCodexDeepSeekToolCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		model    Model
+		wantLite bool
+		wantMode string
+	}{
+		{name: "pro", model: Model{ID: "ds/deepseek-v4-pro"}},
+		{name: "flash", model: Model{ID: "ds/deepseek-v4-flash"}},
+		{name: "renamed provider", model: Model{ID: "custom/deepseek-v4-pro"}},
+		{name: "other model under ds prefix", model: Model{ID: "ds/future-model"}, wantLite: true, wantMode: `"code_mode_only"`},
+		{name: "known GPT", model: Model{ID: "c78/gpt-5.6-sol"}, wantLite: true, wantMode: `"code_mode_only"`},
+		{name: "other unknown model", model: Model{ID: "custom/future-model"}, wantLite: true, wantMode: `"code_mode_only"`},
+		{name: "explicit upstream capabilities", model: Model{
+			ID:            "custom/deepseek-v4-pro",
+			CodexMetadata: json.RawMessage(`{"use_responses_lite":true,"tool_mode":"code_mode_only"}`),
+		}, wantLite: true, wantMode: `"code_mode_only"`},
+		{name: "unrelated upstream metadata", model: Model{
+			ID: "ds/deepseek-v4-pro", CodexMetadata: json.RawMessage(`{"description":"DeepSeek"}`),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := MarshalCodex([]Model{tc.model})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document struct {
+				Models []struct {
+					Slug               string          `json:"slug"`
+					UseResponsesLite   bool            `json:"use_responses_lite"`
+					ToolMode           json.RawMessage `json:"tool_mode"`
+					ApplyPatchToolType string          `json:"apply_patch_tool_type"`
+				} `json:"models"`
+			}
+			if err := json.Unmarshal(data, &document); err != nil {
+				t.Fatal(err)
+			}
+			if len(document.Models) != 1 {
+				t.Fatalf("model count = %d, want 1", len(document.Models))
+			}
+			model := document.Models[0]
+			wantMode := tc.wantMode
+			if wantMode == "" {
+				wantMode = "null"
+			}
+			if model.UseResponsesLite != tc.wantLite || string(model.ToolMode) != wantMode {
+				t.Fatalf("tool capabilities: lite=%v mode=%s, want lite=%v mode=%s", model.UseResponsesLite, model.ToolMode, tc.wantLite, wantMode)
+			}
+			if model.Slug != tc.model.ID || model.ApplyPatchToolType != "freeform" {
+				t.Fatalf("model identity or patch tool changed: %+v", model)
+			}
+		})
+	}
+}
+
 func TestMarshalCodexFallsBackToCommonReasoningLevels(t *testing.T) {
 	data, err := MarshalCodex([]Model{{ID: "custom/future-model"}})
 	if err != nil {

@@ -216,6 +216,8 @@ requires_openai_auth = true
 
 At startup, OneLLMRouter always writes `~/.onellm/model-catalog.json`. With the default `codex.overwrite_catalog: true`, it also replaces `~/.codex/model-catalog.json`, so Codex `/model` can list `provider/model` entries. Set the option to `false` to leave the Codex file untouched.
 
+For `deepseek-` models, the Codex catalog defaults to standard tool calling with Responses Lite and code mode disabled, while retaining freeform `apply_patch`, to prevent tool calls from becoming plain text. This default is independent of the provider prefix; explicit upstream Codex capability metadata still takes precedence.
+
 The desktop Clients page and Core commands parse `~/.codex/config.toml` read-only and report config/catalog paths, the effective model and provider, synchronization state, model count, and the display-only `OneLLMRouter` source tag. They also provide a copyable preview and controlled catalog synchronization:
 
 ```text
