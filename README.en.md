@@ -145,6 +145,8 @@ Set `proxy: true` or `false` on a provider to override the global SOCKS5 setting
 
 Every `models` entry must use object form and explicitly declare its `anthropic`, `openai`, or `responses` upstream routes with `endpoints`. Use `upstream_model` when the exact upstream name differs from the client-visible ID. Configured provider models take precedence over upstream discovery. When `models` is omitted, OneLLMRouter queries that provider's protocol-specific model endpoint.
 
+An empty `models` list also enables discovery. Chat Completions discovers models at `openai_base_url + /v1/models` and sends chat requests to the same base plus `/v1/chat/completions`; do not duplicate the trailing `/v1` in the base URL.
+
 For Anthropic clients, use a client-visible model ID without square brackets (for example, `claude-model-1m`) when the upstream name contains `[1m]`; Claude Code normalizes that suffix before sending the request. Set `upstream_model` to preserve the exact upstream model name.
 
 ## Run

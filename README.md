@@ -162,6 +162,8 @@ model_slots:
   fable: "ds/deepseek-v4-flash-1m"
 ```
 
+当 Provider 的 `models` 省略或为空时，Router 自动发现模型。Chat Completions 使用 `openai_base_url + /v1/models`，聊天请求使用同一基础地址加 `/v1/chat/completions`，因此基础地址不要重复包含末尾的 `/v1`。
+
 ### 3. 启动
 
 ```bash

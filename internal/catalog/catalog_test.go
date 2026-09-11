@@ -69,7 +69,7 @@ func TestListUsesRequestedProtocolURL(t *testing.T) {
 
 	sources := []*source{
 		{endpoint: router.EndpointAnthropic, model: "claude-model", path: "/models"},
-		{endpoint: router.EndpointOpenAI, model: "chat-model", path: "/models"},
+		{endpoint: router.EndpointOpenAI, model: "chat-model", path: "/v1/models"},
 		{endpoint: router.EndpointResponses, model: "responses-model", path: "/v1/models"},
 	}
 	for _, item := range sources {
@@ -135,6 +135,34 @@ func TestListPreservesSuccessfulProvidersWhenAnotherSourceFails(t *testing.T) {
 	assertModelIDs(t, result.Models, "good/gpt-5.6-sol")
 	if len(result.Errors) != 1 || result.Errors[0].Provider != "bad" {
 		t.Fatalf("expected one bad-provider error, got %+v", result.Errors)
+	}
+}
+
+func TestListOpenAIDiscoversModelsInsteadOfWebsite(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, "<!doctype html><title>Provider website</title>")
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Error("model discovery did not forward provider authorization")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":"gpt-5.6-sol"},{"id":"gpt-6-astra"}]}`)
+	}))
+	defer server.Close()
+	service := New(func(*router.Provider) *http.Client { return server.Client() })
+	for _, suffix := range []string{"", "/"} {
+		t.Run("base URL suffix="+suffix, func(t *testing.T) {
+			result := service.List(context.Background(), []router.Provider{{
+				Prefix: "custom", OpenAIBaseURL: server.URL + suffix, APIKey: "test-key",
+			}}, router.EndpointOpenAI)
+			if len(result.Errors) != 0 {
+				t.Fatalf("model discovery failed: %+v", result.Errors)
+			}
+			assertModelIDs(t, result.Models, "custom/gpt-5.6-sol", "custom/gpt-6-astra")
+		})
 	}
 }
 

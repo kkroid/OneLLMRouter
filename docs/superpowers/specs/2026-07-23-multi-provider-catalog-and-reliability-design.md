@@ -72,7 +72,7 @@ This means a multi-protocol provider with one configured model list exposes that
 Automatic discovery uses the existing upstream URL contracts:
 
 - Anthropic: `base_url + /models`, authenticated with `x-api-key`.
-- Chat Completions: `openai_base_url + /models`, authenticated with Bearer auth.
+- Chat Completions: `openai_base_url + /v1/models`, authenticated with Bearer auth (corrected to match the `/v1/chat/completions` base URL contract).
 - Responses: `responses_base_url + /v1/models`, authenticated with Bearer auth.
 
 The source layer owns request construction, response validation, bounded decoding, body closure, and cancellation. The response body is decoded before the per-request context is cancelled. Non-2xx responses and malformed payloads are recorded as source failures.

@@ -203,7 +203,7 @@ func sourceFor(provider *router.Provider, endpoint router.EndpointType) (url, au
 	case router.EndpointAnthropic:
 		return strings.TrimRight(provider.BaseURL, "/") + "/models", "x-api-key", provider.APIKey
 	case router.EndpointOpenAI:
-		return strings.TrimRight(provider.OpenAIBaseURL, "/") + "/models", "Authorization", "Bearer " + provider.APIKey
+		return strings.TrimRight(provider.OpenAIBaseURL, "/") + "/v1/models", "Authorization", "Bearer " + provider.APIKey
 	case router.EndpointResponses:
 		return strings.TrimRight(provider.ResponsesBaseURL, "/") + "/v1/models", "Authorization", "Bearer " + provider.APIKey
 	default:
